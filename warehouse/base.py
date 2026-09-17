@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -13,16 +13,16 @@ class Warehouse(Protocol):
     def backend_name(self) -> str:
         ...
 
-    def me(self, player_id: str) -> Optional[dict[str, Any]]:
+    def me(self, player_id: str) -> dict[str, Any] | None:
         ...
 
-    def opponent(self) -> Optional[dict[str, Any]]:
+    def opponent(self) -> dict[str, Any] | None:
         ...
 
     def get_config(self) -> dict[str, bool]:
         ...
 
-    def set_config(self, *, momentum: Optional[bool] = None, pack_nerf: Optional[bool] = None) -> dict[str, bool]:
+    def set_config(self, *, momentum: bool | None = None, pack_nerf: bool | None = None) -> dict[str, bool]:
         ...
 
     def ingest_events(self, rows: list[dict[str, Any]]) -> None:
@@ -53,4 +53,12 @@ class Warehouse(Protocol):
         ...
 
     def daily(self) -> list[dict[str, Any]]:
+        ...
+
+    def quality(self) -> dict[str, Any]:
+        """Last dbt run / freshness summary for the LiveOps quality panel."""
+        ...
+
+    def integrity_tests(self) -> list[dict[str, Any]]:
+        """Two-proportion z-tests with Wilson CIs from gold.integrity_tests."""
         ...

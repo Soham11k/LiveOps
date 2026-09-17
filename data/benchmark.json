@@ -1,0 +1,13 @@
+{
+  "profile": "demo",
+  "backend": "duckdb",
+  "rows_loaded": 63996,
+  "generate_seconds": 1.143,
+  "bronze_load_seconds": 1.541,
+  "dbt_staging_seconds": 4.657,
+  "dbt_full_build_seconds": 5.454,
+  "dbt_rebuild_seconds": 5.977,
+  "snowflake_credits": null,
+  "notes": "DuckDB local run. Snowflake credits require WAREHOUSE_BACKEND=snowflake and querying ACCOUNT_USAGE.QUERY_HISTORY after seed-snowflake.",
+  "recorded_at": "2026-09-17T16:34:48.603484+00:00"
+}

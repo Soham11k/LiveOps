@@ -6,4 +6,11 @@ numpy==1.26.4
 pytest==8.3.4
 snowflake-connector-python==3.12.3
 pandas==2.2.3
-python-dotenv==1.0.1
+eval_type_backport==0.2.2
+pyarrow==18.1.0
+dbt-core==1.10.13
+dbt-duckdb==1.10.0
+dbt-snowflake==1.10.2
+ruff==0.9.6
+sqlfluff==3.3.1
+sqlfluff-templater-dbt==3.3.1

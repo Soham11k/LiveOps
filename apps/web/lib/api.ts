@@ -86,4 +86,30 @@ export const api = {
   alerts: () => req<Alert[]>("/ops/alerts"),
   daily: () => req<{ day: string; matches: number }[]>("/ops/daily"),
   spend: () => req<{ spend_tier: string; appearances: number; wins: number; win_rate: number }[]>("/ops/spend"),
+  quality: () =>
+    req<{
+      ok: boolean;
+      message: string;
+      passed: number;
+      warned: number;
+      failed: number;
+      models: number;
+      elapsed_seconds: number | null;
+      generated_at?: string;
+      freshness?: { generated_at?: string; sources?: number } | null;
+    }>("/ops/quality"),
+  integrityTests: () =>
+    req<
+      {
+        test_id: string;
+        title: string;
+        baseline_rate: number;
+        patched_rate: number;
+        effect_size: number;
+        z_stat: number;
+        p_value: number;
+        wilson_low: number;
+        wilson_high: number;
+      }[]
+    >("/ops/integrity-tests"),
 };

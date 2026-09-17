@@ -1,5 +1,5 @@
 VENV ?= $(HOME)/.venvs/snowpitch
-.PHONY: install seed seed-snowflake api web test
+.PHONY: install seed seed-snowflake api web test dbt dbt-test dbt-docs lint benchmark
 
 install:
 	python3 -m venv $(VENV)
@@ -21,3 +21,22 @@ web:
 
 test:
 	PYTHONPATH=. $(VENV)/bin/python -m pytest -q
+
+dbt:
+	PYTHONPATH=. DBT_PROFILES_DIR=dbt DUCKDB_PATH=$(CURDIR)/data/snowpitch.duckdb \
+		$(VENV)/bin/dbt build --project-dir dbt --target duckdb
+
+dbt-test:
+	PYTHONPATH=. DBT_PROFILES_DIR=dbt DUCKDB_PATH=$(CURDIR)/data/snowpitch.duckdb \
+		$(VENV)/bin/dbt test --project-dir dbt --target duckdb
+
+dbt-docs:
+	PYTHONPATH=. DBT_PROFILES_DIR=dbt DUCKDB_PATH=$(CURDIR)/data/snowpitch.duckdb \
+		$(VENV)/bin/dbt docs generate --project-dir dbt --target duckdb
+
+lint:
+	$(VENV)/bin/ruff check api warehouse simulator tests
+	$(VENV)/bin/sqlfluff lint dbt/models --dialect duckdb || true
+
+benchmark:
+	PYTHONPATH=. $(VENV)/bin/python -m warehouse.benchmark

@@ -1,0 +1,40 @@
+name: 'snowpitch'
+version: '1.0.0'
+config-version: 2
+
+profile: 'snowpitch'
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+# Thresholds live here rather than in SQL so live-ops can tune detection
+# without a code change, and so the tests and the alert mart cannot drift apart.
+vars:
+  advertised_rare_rate: 0.12
+  baseline_release: '1.11'
+  patched_release: '1.12-whiteout'
+  # Late-game momentum: a fair build converts trailing late chances at roughly
+  # the same rate as everything else. Anything past this is a balance bug.
+  late_comeback_threshold: 0.36
+  # Pack odds: alert when observed rares fall this far below the posted rate.
+  pack_rare_threshold: 0.08
+  # Coin washing: a "sale" this far above median that clears this fast is not a sale.
+  wash_price_multiple: 6
+  wash_max_seconds_listed: 120
+  wash_trade_threshold: 20
+
+models:
+  snowpitch:
+    staging:
+      +materialized: view
+      +schema: silver
+    marts:
+      # DuckDB: views so a bronze insert is enough for a live dashboard.
+      # Snowflake: tables (or incremental merge on the four event-driven
+      # facts). Integrity alerts stay a full-refresh table — they are tiny
+      # and must always see the latest patch metrics.
+      +materialized: "{{ 'table' if target.type == 'snowflake' else 'view' }}"
+      +schema: gold

@@ -4,10 +4,11 @@ import json
 import os
 import threading
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from simulator.config import ADVERTISED_RARE_RATE, PATCH_TS
 from warehouse.base import Warehouse
+from warehouse.dbt_runner import run as dbt_run
 
 _LOCK = threading.Lock()
 SQL_DIR = Path(__file__).resolve().parents[1] / "transform" / "snowflake"
@@ -56,7 +57,6 @@ def _jsonify_rows(rows: list[dict]) -> list[dict]:
 
 def run_sql_file(cur, path: Path) -> None:
     text = path.read_text(encoding="utf-8")
-    # Split on semicolons; skip empty / comment-only chunks.
     for stmt in text.split(";"):
         cleaned = "\n".join(
             line for line in stmt.splitlines() if line.strip() and not line.strip().startswith("--")
@@ -83,7 +83,7 @@ class SnowflakeWarehouse:
         except Exception:
             return False
 
-    def _fetchall(self, sql: str, params: Optional[tuple | list] = None) -> list[dict]:
+    def _fetchall(self, sql: str, params: tuple | list | None = None) -> list[dict]:
         with _LOCK:
             con = connect_snowflake()
             cur = con.cursor()
@@ -93,18 +93,18 @@ class SnowflakeWarehouse:
             con.close()
         return _jsonify_rows(rows)
 
-    def _fetchone(self, sql: str, params: Optional[tuple | list] = None) -> Optional[dict]:
+    def _fetchone(self, sql: str, params: tuple | list | None = None) -> dict | None:
         rows = self._fetchall(sql, params)
         return rows[0] if rows else None
 
-    def _execute(self, sql: str, params: Optional[tuple | list] = None) -> None:
+    def _execute(self, sql: str, params: tuple | list | None = None) -> None:
         with _LOCK:
             con = connect_snowflake()
             cur = con.cursor()
             cur.execute(sql, params or ())
             con.close()
 
-    def me(self, player_id: str) -> Optional[dict[str, Any]]:
+    def me(self, player_id: str) -> dict[str, Any] | None:
         row = self._fetchone(
             """
             SELECT PLAYER_ID AS player_id,
@@ -131,7 +131,7 @@ class SnowflakeWarehouse:
         row["coins"] = row.get("coins") or 7500
         return row
 
-    def opponent(self) -> Optional[dict[str, Any]]:
+    def opponent(self) -> dict[str, Any] | None:
         return self._fetchone(
             """
             SELECT PLAYER_ID AS player_id,
@@ -154,7 +154,7 @@ class SnowflakeWarehouse:
         return data
 
     def set_config(
-        self, *, momentum: Optional[bool] = None, pack_nerf: Optional[bool] = None
+        self, *, momentum: bool | None = None, pack_nerf: bool | None = None
     ) -> dict[str, bool]:
         with _LOCK:
             con = connect_snowflake()
@@ -175,6 +175,8 @@ class SnowflakeWarehouse:
         return self.get_config()
 
     def ingest_events(self, rows: list[dict[str, Any]]) -> None:
+        # Bronze only. Gold is refreshed by the Snowflake Task / Airflow / make dbt.
+        # Never rebuild marts on every live match write.
         with _LOCK:
             con = connect_snowflake()
             cur = con.cursor()
@@ -191,17 +193,32 @@ class SnowflakeWarehouse:
                     """,
                     (row["event_id"], row["event_type"], ts, row["player_id"], payload),
                 )
-            # Refresh gold marts after live writes (trial scale).
-            run_sql_file(cur, SQL_DIR / "03_gold.sql")
+            # Mark marts stale so the Task / Airflow / refresh_marts can pick up.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS SNOWPITCH.BRONZE.MARTS_STALE (
+                    STALE BOOLEAN,
+                    MARKED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+                )
+                """
+            )
+            cur.execute("DELETE FROM SNOWPITCH.BRONZE.MARTS_STALE")
+            cur.execute(
+                "INSERT INTO SNOWPITCH.BRONZE.MARTS_STALE (STALE, MARKED_AT) VALUES (TRUE, CURRENT_TIMESTAMP())"
+            )
             con.close()
 
     def refresh_marts(self) -> None:
-        with _LOCK:
-            con = connect_snowflake()
-            cur = con.cursor()
-            run_sql_file(cur, SQL_DIR / "02_silver.sql")
-            run_sql_file(cur, SQL_DIR / "03_gold.sql")
-            con.close()
+        dbt_run("build", target="snowflake")
+        try:
+            self._execute(
+                """
+                UPDATE SNOWPITCH.BRONZE.MARTS_STALE
+                SET STALE = FALSE, MARKED_AT = CURRENT_TIMESTAMP()
+                """
+            )
+        except Exception:
+            pass
 
     def listings(self, limit: int = 12) -> list[dict[str, Any]]:
         return self._fetchall(
@@ -305,6 +322,28 @@ class SnowflakeWarehouse:
             ORDER BY DAY
             """
         )
+
+    def integrity_tests(self) -> list[dict[str, Any]]:
+        return self._fetchall(
+            """
+            SELECT TEST_ID AS test_id,
+                   TITLE AS title,
+                   BASELINE_RATE AS baseline_rate,
+                   PATCHED_RATE AS patched_rate,
+                   EFFECT_SIZE AS effect_size,
+                   Z_STAT AS z_stat,
+                   P_VALUE AS p_value,
+                   WILSON_LOW AS wilson_low,
+                   WILSON_HIGH AS wilson_high
+            FROM SNOWPITCH.GOLD.INTEGRITY_TESTS
+            ORDER BY TEST_ID
+            """
+        )
+
+    def quality(self) -> dict[str, Any]:
+        from warehouse.dbt_runner import last_run_summary
+
+        return last_run_summary()
 
 
 _: Warehouse = SnowflakeWarehouse()  # type: ignore[assignment]

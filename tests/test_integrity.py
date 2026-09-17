@@ -1,7 +1,7 @@
 import os
+from pathlib import Path
 
 import pytest
-from pathlib import Path
 
 from simulator.config import DB_PATH
 from warehouse.build import connect

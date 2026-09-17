@@ -1,0 +1,123 @@
+version: 2
+
+models:
+
+  - name: fct_match_fairness
+    description: >
+      Per-patch match integrity: late-game comeback conversion plus win rate by
+      spend cohort. One row per patch.
+    columns:
+      - name: patch
+        data_tests: [not_null, unique]
+      - name: trailing_late_chances
+        description: Denominator for the momentum check.
+        data_tests: [not_null]
+      - name: late_comeback_rate
+        description: Share of late chances by a trailing side that were scored.
+        data_tests:
+          - not_null
+          - accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+
+  - name: fct_pack_odds
+    description: Advertised versus observed rare rate per patch, with a chi-square statistic.
+    columns:
+      - name: patch
+        data_tests: [not_null, unique]
+      - name: packs
+        data_tests: [not_null]
+      - name: observed_rare_rate
+        data_tests:
+          - not_null
+          - accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: advertised_rare_rate
+        description: Must stay a probability; anything else means a broken store config.
+        data_tests:
+          - accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+
+  - name: fct_market_health
+    description: Transfer-market volume, pricing, and suspected coin-washing per patch.
+    columns:
+      - name: patch
+        data_tests: [not_null, unique]
+      - name: trades
+        data_tests: [not_null]
+      - name: suspected_wash
+        description: Trades matching the wash signature. Never negative.
+        data_tests:
+          - not_null
+          - accepted_range:
+              arguments:
+                min_value: 0
+
+  - name: fct_spend_fairness
+    description: Appearances and win rate per monetisation cohort.
+    columns:
+      - name: spend_tier
+        data_tests: [not_null, unique]
+      - name: win_rate
+        data_tests:
+          - not_null
+          - accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+
+  - name: fct_daily_activity
+    description: Daily match counts, used for the dashboard trend and as a volume canary.
+    columns:
+      - name: day
+        data_tests: [not_null, unique]
+      - name: matches
+        data_tests: [not_null]
+
+  - name: fct_integrity_alerts
+    description: >
+      Firing alerts, one row per detected integrity problem. This is what the
+      live-ops dashboard reads and what a on-call engineer would triage.
+    columns:
+      - name: alert_id
+        data_tests:
+          - not_null
+          - unique
+          - accepted_values:
+              arguments:
+                values: ['momentum', 'pack_odds', 'coin_ring']
+      - name: severity
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['low', 'medium', 'high', 'critical']
+      - name: detail
+        description: Plain-language explanation shown in the dashboard.
+        data_tests: [not_null]
+
+  - name: fct_integrity_tests
+    description: >
+      Two-proportion z-tests with Wilson 95% CIs for each planted integrity bug.
+      Complements the threshold-based alert mart with statistical evidence.
+    columns:
+      - name: test_id
+        data_tests:
+          - not_null
+          - unique
+          - accepted_values:
+              arguments:
+                values: ['momentum', 'pack_odds', 'coin_ring']
+      - name: z_stat
+        description: Two-proportion z statistic (patched minus baseline).
+      - name: p_value
+        description: Approximate two-sided p from standard-normal bands.
+      - name: wilson_low
+        description: Lower Wilson 95% bound on the patched rate.
+      - name: wilson_high
+        description: Upper Wilson 95% bound on the patched rate.

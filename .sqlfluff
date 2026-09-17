@@ -1,0 +1,9 @@
+[sqlfluff]
+dialect = duckdb
+templater = dbt
+max_line_length = 120
+exclude_rules = AL01,AL05,ST06,RF02
+
+[sqlfluff:templater:dbt]
+project_dir = ./dbt
+profiles_dir = ./dbt

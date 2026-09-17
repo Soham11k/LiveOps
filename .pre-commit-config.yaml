@@ -1,0 +1,20 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+  - repo: https://github.com/sqlfluff/sqlfluff
+    rev: 3.3.1
+    hooks:
+      - id: sqlfluff-lint
+        additional_dependencies: ["sqlfluff-templater-dbt", "dbt-duckdb"]
+        files: ^dbt/models/
+  - repo: local
+    hooks:
+      - id: pytest-integrity
+        name: pytest integrity
+        entry: bash -c 'PYTHONPATH=. python -m pytest -q tests/test_integrity.py'
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

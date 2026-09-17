@@ -4,6 +4,7 @@ import React, { Suspense, useEffect, useState } from "react";
 import { useGLTF } from "@react-three/drei";
 import type { GroupProps } from "@react-three/fiber";
 import * as THREE from "three";
+import { StripedPitch } from "@/components/StadiumFX";
 
 const availabilityCache = new Map<string, Promise<boolean>>();
 
@@ -33,10 +34,12 @@ function useModelAvailable(path: string) {
 
 function PrimitiveBall(props: GroupProps) {
   return (
-    <mesh {...props} castShadow>
-      <sphereGeometry args={[0.35, 24, 24]} />
-      <meshStandardMaterial color="#f4f7f2" roughness={0.35} />
-    </mesh>
+    <group {...props}>
+      <mesh castShadow>
+        <sphereGeometry args={[0.35, 24, 24]} />
+        <meshStandardMaterial color="#f4f7f2" roughness={0.35} metalness={0.15} />
+      </mesh>
+    </group>
   );
 }
 
@@ -96,30 +99,27 @@ export function PlayerModel({ color, ...props }: GroupProps & { color: string })
 function Goal({ x }: { x: number }) {
   return (
     <group position={[x, 0, 0]}>
-      <mesh position={[0, 1.2, -2.2]}>
+      <mesh position={[0, 1.2, -2.2]} castShadow>
         <boxGeometry args={[0.15, 2.4, 0.15]} />
-        <meshStandardMaterial color="#d9efe8" />
+        <meshStandardMaterial color="#e8f0ec" metalness={0.4} roughness={0.3} />
       </mesh>
-      <mesh position={[0, 1.2, 2.2]}>
+      <mesh position={[0, 1.2, 2.2]} castShadow>
         <boxGeometry args={[0.15, 2.4, 0.15]} />
-        <meshStandardMaterial color="#d9efe8" />
+        <meshStandardMaterial color="#e8f0ec" metalness={0.4} roughness={0.3} />
       </mesh>
-      <mesh position={[0, 2.4, 0]}>
+      <mesh position={[0, 2.4, 0]} castShadow>
         <boxGeometry args={[0.15, 0.15, 4.4]} />
-        <meshStandardMaterial color="#d9efe8" />
+        <meshStandardMaterial color="#e8f0ec" metalness={0.4} roughness={0.3} />
       </mesh>
     </group>
   );
 }
 
-function PrimitiveStadium() {
+function PrimitiveStadium({ snowAmount = 0 }: { snowAmount?: number }) {
   const border = React.useMemo(() => new THREE.BoxGeometry(36, 0.02, 22), []);
   return (
     <group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[42, 28]} />
-        <meshStandardMaterial color="#14352c" />
-      </mesh>
+      <StripedPitch snowAmount={snowAmount} />
       <lineSegments>
         <edgesGeometry args={[border]} />
         <lineBasicMaterial color="#e8f4e4" />
@@ -134,13 +134,22 @@ function PrimitiveStadium() {
       </mesh>
       <Goal x={-18} />
       <Goal x={18} />
-      <mesh position={[0, 1.2, -14]} castShadow>
-        <boxGeometry args={[40, 2.4, 2]} />
-        <meshStandardMaterial color="#1a2420" />
+      {/* Tiered stands under the crowd */}
+      <mesh position={[0, 0.6, -16]} castShadow receiveShadow>
+        <boxGeometry args={[42, 1.2, 4]} />
+        <meshStandardMaterial color="#161c1a" />
       </mesh>
-      <mesh position={[0, 1.2, 14]} castShadow>
-        <boxGeometry args={[40, 2.4, 2]} />
-        <meshStandardMaterial color="#1a2420" />
+      <mesh position={[0, 0.6, 16]} castShadow receiveShadow>
+        <boxGeometry args={[42, 1.2, 4]} />
+        <meshStandardMaterial color="#161c1a" />
+      </mesh>
+      <mesh position={[0, 2.4, -17.2]} castShadow>
+        <boxGeometry args={[44, 3.2, 1.2]} />
+        <meshStandardMaterial color="#1a2220" />
+      </mesh>
+      <mesh position={[0, 2.4, 17.2]} castShadow>
+        <boxGeometry args={[44, 3.2, 1.2]} />
+        <meshStandardMaterial color="#1a2220" />
       </mesh>
     </group>
   );
@@ -151,11 +160,11 @@ function GlbStadium() {
   return <primitive object={gltf.scene.clone()} scale={1} />;
 }
 
-export function StadiumModel() {
+export function StadiumModel({ snowAmount = 0 }: { snowAmount?: number }) {
   const available = useModelAvailable("/models/stadium.glb");
-  if (!available) return <PrimitiveStadium />;
+  if (!available) return <PrimitiveStadium snowAmount={snowAmount} />;
   return (
-    <Suspense fallback={<PrimitiveStadium />}>
+    <Suspense fallback={<PrimitiveStadium snowAmount={snowAmount} />}>
       <GlbStadium />
     </Suspense>
   );

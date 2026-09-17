@@ -1,10 +1,14 @@
 "use client";
 
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Trail } from "@react-three/drei";
+import { EffectComposer, Bloom, Vignette, DepthOfField } from "@react-three/postprocessing";
+import { BlendFunction } from "postprocessing";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { api, type Opponent, type Profile } from "@/lib/api";
 import { BallModel, PlayerModel, StadiumModel } from "@/components/Models";
+import { Crowd, Floodlights, GroundAtmosphere, SnowStorm } from "@/components/StadiumFX";
 
 type ChanceLog = {
   minute: number;
@@ -24,7 +28,7 @@ const SCRIPT = [
   { minute: 84, home: false },
 ];
 
-type Phase = "ready" | "run" | "chance" | "done";
+type Phase = "ready" | "run" | "chance" | "done" | "replay";
 
 type SceneState = {
   phase: Phase;
@@ -34,6 +38,11 @@ type SceneState = {
   chanceIdx: number;
   timing: number;
   ball: THREE.Vector3;
+  pauseSec?: number;
+  chanceStarted?: number;
+  lastGoalAt?: number;
+  camMode: "broadcast" | "goal" | "replay";
+  riggedPulse: boolean;
 };
 
 const HOME_SPOTS: [number, number, number][] = [
@@ -52,25 +61,60 @@ const HOME_SPOTS: [number, number, number][] = [
 
 const AWAY_SPOTS: [number, number, number][] = HOME_SPOTS.map(([x, y, z]) => [-x, y, -z]);
 
-/** Wall-clock paced: ~2 game-minutes per real second (~45s match). */
 const GAME_MINUTES_PER_SEC = 2.0;
 const TICK_MS = 50;
 
+function BroadcastCamera({ stateRef }: { stateRef: React.MutableRefObject<SceneState> }) {
+  const { camera } = useThree();
+  const target = useRef(new THREE.Vector3(0, 0, 0));
+  const desired = useRef(new THREE.Vector3(0, 18, 22));
+
+  useFrame((state, delta) => {
+    const s = stateRef.current;
+    const ball = s.ball;
+    target.current.lerp(ball, 1 - Math.exp(-3 * delta));
+
+    if (s.camMode === "goal") {
+      const side = ball.x >= 0 ? 1 : -1;
+      desired.current.set(side * 16, 2.2, ball.z * 0.3);
+    } else if (s.camMode === "replay") {
+      const t = (state.clock.elapsedTime - (s.lastGoalAt || 0)) * 0.6;
+      desired.current.set(Math.sin(t) * 14, 8 + Math.sin(t * 0.5) * 2, Math.cos(t) * 14);
+    } else {
+      desired.current.set(ball.x * 0.35, 16 + s.minute * 0.02, 20 + Math.abs(ball.x) * 0.05);
+    }
+
+    camera.position.lerp(desired.current, 1 - Math.exp(-2.2 * delta));
+    camera.lookAt(target.current.x, 0.4, target.current.z);
+  });
+
+  return null;
+}
+
 function MatchScene({
   stateRef,
+  momentum,
 }: {
   stateRef: React.MutableRefObject<SceneState>;
+  momentum: boolean;
 }) {
   const ballRef = useRef<THREE.Group>(null);
   const homeRefs = useRef<(THREE.Group | null)[]>([]);
   const awayRefs = useRef<(THREE.Group | null)[]>([]);
+  const [snow, setSnow] = useState(0);
+  const [vignette, setVignette] = useState(0.45);
 
   useFrame((frameState, delta) => {
     const s = stateRef.current;
     const t = frameState.clock.elapsedTime;
+    setSnow(Math.min(0.75, s.minute / 90));
 
-    // Visuals only — clock/chance logic runs on a wall-clock interval.
-    if (s.phase === "run") {
+    const trailing = s.home < s.away;
+    const rigged = momentum && trailing && s.minute >= 70 && (s.phase === "run" || s.phase === "chance");
+    s.riggedPulse = rigged;
+    setVignette(rigged ? 0.55 + Math.sin(t * 4) * 0.25 : 0.42);
+
+    if (s.phase === "run" || s.phase === "replay") {
       const progress = s.minute / 90;
       s.ball.set(
         -12 + progress * 24 + Math.sin(t * 1.4) * 1.5,
@@ -105,23 +149,21 @@ function MatchScene({
 
   return (
     <>
-      <color attach="background" args={["#0c1210"]} />
-      <fog attach="fog" args={["#0c1210", 28, 70]} />
-      <ambientLight intensity={0.45} />
-      <directionalLight
-        castShadow
-        position={[12, 22, 8]}
-        intensity={1.15}
-        shadow-mapSize-width={1024}
-        shadow-mapSize-height={1024}
-      />
-      <hemisphereLight args={["#d9efe8", "#14352c", 0.35]} />
+      <color attach="background" args={["#071018"]} />
+      <fog attach="fog" args={["#071018", 32, 75]} />
+      <ambientLight intensity={0.22} />
+      <hemisphereLight args={["#b8c8d4", "#0a1410", 0.35]} />
+      <Floodlights />
+      <SnowStorm count={4000} />
+      <StadiumModel snowAmount={snow} />
+      <Crowd count={2800} />
+      <GroundAtmosphere />
 
-      <StadiumModel />
-
-      <group ref={ballRef} position={[0, 0.35, 0]}>
-        <BallModel />
-      </group>
+      <Trail width={1.2} length={8} color="#e8f4ff" attenuation={(w) => w * w}>
+        <group ref={ballRef} position={[0, 0.35, 0]}>
+          <BallModel />
+        </group>
+      </Trail>
 
       {HOME_SPOTS.map((spot, i) => (
         <group
@@ -146,10 +188,19 @@ function MatchScene({
         </group>
       ))}
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow>
-        <planeGeometry args={[80, 80]} />
-        <meshStandardMaterial color="#0a100e" />
-      </mesh>
+      <BroadcastCamera stateRef={stateRef} />
+
+      <EffectComposer multisampling={0}>
+        <Bloom intensity={0.55} luminanceThreshold={0.55} mipmapBlur />
+        <DepthOfField focusDistance={0.02} focalLength={0.04} bokehScale={2.2} />
+        <Vignette
+          offset={0.25}
+          darkness={vignette}
+          blendFunction={
+            stateRef.current.riggedPulse ? BlendFunction.COLOR_BURN : BlendFunction.NORMAL
+          }
+        />
+      </EffectComposer>
     </>
   );
 }
@@ -166,6 +217,7 @@ export function MatchGame({ profile }: { profile: Profile }) {
   const [opened, setOpened] = useState(false);
   const [momentum, setMomentum] = useState(true);
   const [error, setError] = useState("");
+  const [riggedHint, setRiggedHint] = useState(false);
   const chancesRef = useRef<ChanceLog[]>([]);
   const submitted = useRef(false);
   const homeRef = useRef(0);
@@ -182,6 +234,8 @@ export function MatchGame({ profile }: { profile: Profile }) {
     chanceIdx: 0,
     timing: 0,
     ball: new THREE.Vector3(0, 0.35, 0),
+    camMode: "broadcast",
+    riggedPulse: false,
   });
 
   useEffect(() => {
@@ -198,21 +252,22 @@ export function MatchGame({ profile }: { profile: Profile }) {
     api.config().then((c) => setMomentum(c.momentum)).catch(() => undefined);
   }, []);
 
-  // Wall-clock game loop — catches up even when timers are throttled.
   useEffect(() => {
     const id = window.setInterval(() => {
       const s = stateRef.current;
       if (s.phase === "run") {
         if (matchStartedAt.current == null) matchStartedAt.current = performance.now();
         const elapsedSec = (performance.now() - matchStartedAt.current) / 1000;
-        // Account for time spent in chance pauses by storing pause offset on the state object.
-        const pause = (s as SceneState & { pauseSec?: number }).pauseSec || 0;
+        const pause = s.pauseSec || 0;
         s.minute = Math.min(90, Math.max(0, (elapsedSec - pause) * GAME_MINUTES_PER_SEC));
+        const trailing = homeRef.current < awayRef.current;
+        setRiggedHint(momentumRef.current && trailing && s.minute >= 70);
         const next = SCRIPT[s.chanceIdx];
         if (next && s.minute >= next.minute) {
           s.phase = "chance";
           s.timing = 0;
-          (s as SceneState & { chanceStarted?: number }).chanceStarted = performance.now();
+          s.camMode = "goal";
+          s.chanceStarted = performance.now();
           phaseRef.current = "chance";
           setPhase("chance");
           setBanner(next.home ? "CHANCE — shoot" : "THEY ATTACK — tackle");
@@ -225,6 +280,13 @@ export function MatchGame({ profile }: { profile: Profile }) {
         }
       } else if (s.phase === "chance") {
         s.timing = (s.timing + 0.05) % 1;
+      } else if (s.phase === "replay") {
+        if (s.lastGoalAt != null && performance.now() / 1000 - s.lastGoalAt > 2.4) {
+          s.camMode = "broadcast";
+          s.phase = s.chanceIdx >= SCRIPT.length ? "done" : "run";
+          phaseRef.current = s.phase;
+          setPhase(s.phase);
+        }
       }
       setMinute(Math.floor(s.minute));
       setTiming(s.timing);
@@ -238,14 +300,17 @@ export function MatchGame({ profile }: { profile: Profile }) {
     const next = SCRIPT[s.chanceIdx];
     if (!next) return;
     const t = s.timing;
-    const sweet = Math.abs(t - 0.7) < 0.08;
     const trailing = next.home ? homeRef.current < awayRef.current : awayRef.current < homeRef.current;
     const late = next.minute >= 70;
+    // Fair window ±0.08; momentum bug widens to ±0.18 — visible on the bar.
+    const fairWindow = 0.08;
+    const riggedWindow = 0.18;
+    const window = momentumRef.current && trailing && late ? riggedWindow : fairWindow;
+    const sweet = Math.abs(t - 0.7) < window;
     let scored = sweet;
-    if (momentumRef.current && trailing && late && Math.abs(t - 0.7) < 0.18) scored = true;
     if (!next.home) {
       scored = !sweet;
-      if (momentumRef.current && trailing && late && Math.abs(t - 0.7) < 0.18) scored = true;
+      if (momentumRef.current && trailing && late && Math.abs(t - 0.7) < riggedWindow) scored = true;
     }
     if (scored) {
       if (next.home) {
@@ -258,6 +323,11 @@ export function MatchGame({ profile }: { profile: Profile }) {
         s.away = awayRef.current;
       }
       setBanner(next.home ? "Goal." : "Conceded.");
+      s.camMode = "replay";
+      s.lastGoalAt = performance.now() / 1000;
+      s.phase = "replay";
+      phaseRef.current = "replay";
+      setPhase("replay");
     } else {
       setBanner(next.home ? "Saved." : "Tackle won.");
     }
@@ -273,22 +343,26 @@ export function MatchGame({ profile }: { profile: Profile }) {
       },
     ];
     s.chanceIdx += 1;
-    // Freeze wall-clock during the chance so resume continues from the script minute.
-    const started = (s as SceneState & { chanceStarted?: number }).chanceStarted;
+    const started = s.chanceStarted;
     if (started != null && matchStartedAt.current != null) {
-      const pauseObj = s as SceneState & { pauseSec?: number };
-      pauseObj.pauseSec = (pauseObj.pauseSec || 0) + (performance.now() - started) / 1000;
+      s.pauseSec = (s.pauseSec || 0) + (performance.now() - started) / 1000;
     }
-    if (s.chanceIdx >= SCRIPT.length) {
-      s.phase = "done";
-      s.minute = 90;
-      phaseRef.current = "done";
-      setPhase("done");
-      setMinute(90);
-    } else {
-      s.phase = "run";
-      phaseRef.current = "run";
-      setPhase("run");
+    if (!scored) {
+      if (s.chanceIdx >= SCRIPT.length) {
+        s.phase = "done";
+        s.minute = 90;
+        s.camMode = "broadcast";
+        phaseRef.current = "done";
+        setPhase("done");
+        setMinute(90);
+      } else {
+        s.phase = "run";
+        s.camMode = "broadcast";
+        phaseRef.current = "run";
+        setPhase("run");
+      }
+    } else if (s.chanceIdx >= SCRIPT.length) {
+      // replay will transition to done
     }
   }
 
@@ -298,6 +372,7 @@ export function MatchGame({ profile }: { profile: Profile }) {
     setHome(0);
     setAway(0);
     setMinute(0);
+    setRiggedHint(false);
     chancesRef.current = [];
     submitted.current = false;
     setPack(null);
@@ -311,8 +386,10 @@ export function MatchGame({ profile }: { profile: Profile }) {
       chanceIdx: 0,
       timing: 0,
       ball: new THREE.Vector3(0, 0.35, 0),
+      pauseSec: 0,
+      camMode: "broadcast",
+      riggedPulse: false,
     };
-    (stateRef.current as SceneState & { pauseSec?: number }).pauseSec = 0;
     phaseRef.current = "run";
     setPhase("run");
   }
@@ -348,7 +425,7 @@ export function MatchGame({ profile }: { profile: Profile }) {
       if (e.code === "Space") {
         e.preventDefault();
         if (phaseRef.current === "ready") start();
-        else resolveChance();
+        else if (phaseRef.current === "chance") resolveChance();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -359,6 +436,10 @@ export function MatchGame({ profile }: { profile: Profile }) {
     () => ({ position: [0, 18, 22] as [number, number, number], fov: 42 }),
     []
   );
+
+  const trailing = home < away;
+  const windowPct = momentum && trailing && minute >= 70 ? 36 : 16;
+  const windowLeft = 70 - windowPct / 2;
 
   return (
     <div>
@@ -374,25 +455,38 @@ export function MatchGame({ profile }: { profile: Profile }) {
                   {away} {opponent?.display_name || "Opponent"}
                 </strong>
               </div>
+              {riggedHint && (
+                <div className="rigged-chip" title="Momentum scripting is widening late chances">
+                  Momentum assist active
+                </div>
+              )}
             </div>
             <Canvas
               shadows
+              dpr={[1, 1.75]}
               camera={camera}
+              onCreated={({ gl }) => {
+                gl.toneMapping = THREE.ACESFilmicToneMapping;
+                gl.toneMappingExposure = 1.05;
+              }}
               onClick={() => {
                 if (phaseRef.current === "ready") start();
-                else resolveChance();
+                else if (phaseRef.current === "chance") resolveChance();
               }}
-              style={{ width: "100%", height: 420 }}
+              style={{ width: "100%", height: 460 }}
             >
-              <MatchScene stateRef={stateRef} />
+              <MatchScene stateRef={stateRef} momentum={momentum} />
             </Canvas>
             {phase === "chance" && (
-              <div className="chance-banner">
+              <div className={`chance-banner ${riggedHint ? "rigged" : ""}`}>
                 <p>{banner}</p>
                 <div className="bar">
-                  <i style={{ left: "62%", width: "16%" }} />
+                  <i style={{ left: `${windowLeft}%`, width: `${windowPct}%` }} />
                   <b style={{ left: `${timing * 100}%` }} />
                 </div>
+                {riggedHint && (
+                  <p className="muted">Green window widened — this is the planted momentum bug.</p>
+                )}
               </div>
             )}
             {phase === "ready" && (
@@ -401,6 +495,11 @@ export function MatchGame({ profile }: { profile: Profile }) {
                   Kick off
                 </button>
                 <p className="muted">Space or click when the bar hits green.</p>
+              </div>
+            )}
+            {phase === "replay" && (
+              <div className="chance-banner">
+                <p>Replay</p>
               </div>
             )}
           </div>
@@ -452,8 +551,8 @@ export function MatchGame({ profile }: { profile: Profile }) {
             ))}
           </ul>
           <p className="muted" style={{ marginTop: 16 }}>
-            3D Whiteout pitch · momentum {momentum ? "on" : "off"}. Late trailing chances are easier while it is on —
-            that is the bug LiveOps should flag.
+            Whiteout night match · momentum {momentum ? "on" : "off"}. When you trail past 70&apos;, the timing
+            window widens and the vignette burns red — the same bias gold.integrity_alerts must catch.
           </p>
         </aside>
       </div>

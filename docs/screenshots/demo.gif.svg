@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#071018"/>
+      <stop offset="100%" stop-color="#1a3040"/>
+    </linearGradient>
+  </defs>
+  <rect width="960" height="540" fill="url(#g)"/>
+  <text x="480" y="250" fill="#d4b06a" font-family="Georgia, serif" font-size="36" text-anchor="middle">Snowpitch</text>
+  <text x="480" y="300" fill="#c5d4c8" font-family="sans-serif" font-size="18" text-anchor="middle">Replace with a 60s demo.gif</text>
+</svg>

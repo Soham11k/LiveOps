@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import random
 from datetime import datetime, timezone
-from typing import Optional
+
+from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -50,7 +51,7 @@ class MatchIn(BaseModel):
     player_id: str
     home_goals: int
     away_goals: int
-    chances: list[ChanceIn] = Field(default_factory=list)
+    chances: List[ChanceIn] = Field(default_factory=list)
     opponent_id: Optional[str] = None
     opponent_ovr: int = 78
 
@@ -388,3 +389,19 @@ def daily() -> list[dict]:
 @app.get("/ops/spend")
 def spend() -> list[dict]:
     return wh().spend()
+
+
+@app.get("/ops/quality")
+def quality() -> dict:
+    return wh().quality()
+
+
+@app.get("/ops/integrity-tests")
+def integrity_tests() -> list[dict]:
+    return wh().integrity_tests()
+
+
+@app.post("/ops/refresh")
+def refresh_marts() -> dict:
+    wh().refresh_marts()
+    return {"ok": True, "backend": wh().backend_name()}

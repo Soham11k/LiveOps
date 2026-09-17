@@ -1,0 +1,108 @@
+version: 2
+
+models:
+
+  - name: stg_players
+    description: One row per player snapshot, human and bot alike.
+    columns:
+      - name: player_id
+        data_tests: [not_null]
+      - name: spend_tier
+        description: >
+          Monetisation cohort, used to check pay-to-win pressure. Strictly a
+          spend bucket: account type belongs in `bot`. This test is what caught
+          the API stamping the live player as spend_tier='human', which was
+          silently excluding every human match from the fairness marts.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['f2p', 'casual', 'whale']
+      - name: ovr
+        description: Squad rating, 1-99.
+        data_tests:
+          - not_null
+
+  - name: stg_matches
+    description: Completed matches with final score and both sides' cohorts.
+    columns:
+      - name: match_id
+        data_tests: [not_null, unique]
+      - name: patch
+        data_tests: [not_null]
+      - name: home_goals
+        data_tests: [not_null]
+      - name: away_goals
+        data_tests: [not_null]
+
+  - name: stg_chances
+    description: Every shooting opportunity, with the game state that produced it.
+    columns:
+      - name: chance_id
+        data_tests: [not_null, unique]
+      - name: match_id
+        description: Every chance must belong to a match that actually finished.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_matches')
+                field: match_id
+      - name: timing
+        description: Shot timing quality, 0-1. Values outside that range mean a client bug.
+        data_tests:
+          - not_null
+
+  - name: stg_goals
+    description: Chances that were converted. Joins to stg_chances on chance_id.
+    columns:
+      - name: chance_id
+        description: A goal without a preceding chance would mean lost or forged telemetry.
+        data_tests:
+          - not_null
+          - unique
+          - relationships:
+              arguments:
+                to: ref('stg_chances')
+                field: chance_id
+
+  - name: stg_packs
+    description: Pack openings with the odds advertised at point of sale.
+    columns:
+      - name: pack_id
+        data_tests: [not_null, unique]
+      - name: advertised_rare_rate
+        data_tests: [not_null]
+      - name: rarity
+        description: >
+          Guards the store's rarity vocabulary. A new tier appearing here
+          without the pack-odds model being taught about it would quietly skew
+          the rare rate, so this test is the tripwire for that.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['common', 'uncommon', 'rare']
+
+  - name: stg_trades
+    description: Completed transfer-market sales with a reference price.
+    columns:
+      - name: trade_id
+        data_tests: [not_null, unique]
+      - name: price
+        data_tests: [not_null]
+      - name: seller_id
+        data_tests: [not_null]
+      - name: rarity
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['common', 'uncommon', 'rare']
+      - name: median_ref
+        description: Going rate at sale time; the wash-trade check divides by it.
+        data_tests:
+          - not_null
+          - accepted_range:
+              arguments:
+                min_value: 1

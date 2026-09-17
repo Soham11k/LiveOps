@@ -23,15 +23,15 @@ export default function HomePage() {
         <section className="card">
           <h2>The 3D game</h2>
           <p className="lede">
-            FC Rime on a react-three-fiber pitch. When a chance opens, hit Space in the green window
-            to shoot — or to tackle if they are attacking. Optional Blender .glb models; primitives if missing.
+            Night Whiteout pitch — snow, floodlights, crowd, broadcast cams. When momentum is on and you
+            trail past 70&apos;, the timing window widens on screen. That is the bug LiveOps must catch.
           </p>
         </section>
         <section className="card">
           <h2>The warehouse</h2>
           <p className="lede">
-            Bronze JSON events, silver matches/packs/trades, gold fairness and alerts.
-            DuckDB locally, or a real Snowflake trial via WAREHOUSE_BACKEND=snowflake.
+            dbt owns silver and gold. Airflow + CI run the pipeline. Gold raises alerts and
+            two-proportion z-tests. DuckDB locally, or a real Snowflake trial via WAREHOUSE_BACKEND.
           </p>
         </section>
       </div>

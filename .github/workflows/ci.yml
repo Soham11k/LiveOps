@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  lint-test-dbt:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Python deps
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+
+      - name: Ruff
+        run: .venv/bin/ruff check api warehouse simulator tests dags
+
+      - name: SQLFluff (dbt models)
+        run: |
+          .venv/bin/sqlfluff lint dbt/models --dialect duckdb || true
+
+      - name: Seed DuckDB + dbt build
+        env:
+          DBT_PROFILES_DIR: dbt
+          DUCKDB_PATH: ${{ github.workspace }}/data/snowpitch.duckdb
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          .venv/bin/python -m simulator.generate
+          .venv/bin/dbt deps --project-dir dbt || true
+          .venv/bin/dbt build --project-dir dbt --target duckdb
+
+      - name: Pytest
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: .venv/bin/python -m pytest -q
+
+      - name: dbt docs
+        env:
+          DBT_PROFILES_DIR: dbt
+          DUCKDB_PATH: ${{ github.workspace }}/data/snowpitch.duckdb
+        run: .venv/bin/dbt docs generate --project-dir dbt --target duckdb
+
+      - name: Upload dbt docs
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-docs
+          path: dbt/target

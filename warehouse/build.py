@@ -1,13 +1,5 @@
-"""Compatibility shim — prefer warehouse.duckdb_backend / get_warehouse()."""
+"""Compatibility shim. Prefer warehouse.duckdb_backend."""
 
-from warehouse.duckdb_backend import connect, rebuild
-from warehouse.duckdb_backend import _ingest_event as ingest_event
-from warehouse.duckdb_backend import _silver, _gold
+from warehouse.duckdb_backend import connect, load_bronze, rebuild
 
-
-def refresh_marts(con) -> None:
-    _silver(con)
-    _gold(con)
-
-
-__all__ = ["connect", "rebuild", "ingest_event", "refresh_marts"]
+__all__ = ["connect", "load_bronze", "rebuild"]

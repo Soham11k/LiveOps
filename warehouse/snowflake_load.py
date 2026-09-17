@@ -1,4 +1,4 @@
-"""Load data/events.jsonl into Snowflake and rebuild silver/gold marts.
+"""Load data/events.jsonl into Snowflake bronze, then run dbt for silver/gold.
 
 Usage:
   PYTHONPATH=. python -m warehouse.snowflake_load
@@ -10,7 +10,13 @@ import os
 from pathlib import Path
 
 from simulator.config import EVENTS_PATH
-from warehouse.snowflake_backend import SQL_DIR, connect_snowflake, run_sql_file, snowflake_env_ready
+from warehouse.dbt_runner import run as dbt_run
+from warehouse.snowflake_backend import (
+    SQL_DIR,
+    connect_snowflake,
+    run_sql_file,
+    snowflake_env_ready,
+)
 
 
 def load(events_path: str | None = None) -> None:
@@ -75,17 +81,39 @@ def load(events_path: str | None = None) -> None:
             ('pack_nerf', 'true')
         """
     )
-
-    run_sql_file(cur, SQL_DIR / "02_silver.sql")
-    run_sql_file(cur, SQL_DIR / "03_gold.sql")
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS SNOWPITCH.BRONZE.MARTS_STALE (
+            STALE BOOLEAN,
+            MARKED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+        )
+        """
+    )
+    cur.execute("DELETE FROM SNOWPITCH.BRONZE.MARTS_STALE")
+    cur.execute(
+        "INSERT INTO SNOWPITCH.BRONZE.MARTS_STALE (STALE, MARKED_AT) VALUES (TRUE, CURRENT_TIMESTAMP())"
+    )
 
     cur.execute("SELECT COUNT(*) FROM SNOWPITCH.BRONZE.RAW_EVENTS")
     n = cur.fetchone()[0]
-    cur.execute("SELECT COUNT(*) FROM SNOWPITCH.GOLD.INTEGRITY_ALERTS")
-    alerts = cur.fetchone()[0]
+    con.close()
+
+    # dbt owns every silver view and gold mart definition.
+    dbt_run("build", target="snowflake")
+
+    con = connect_snowflake()
+    cur = con.cursor()
+    cur.execute(
+        "UPDATE SNOWPITCH.BRONZE.MARTS_STALE SET STALE = FALSE, MARKED_AT = CURRENT_TIMESTAMP()"
+    )
+    try:
+        cur.execute("SELECT COUNT(*) FROM SNOWPITCH.GOLD.INTEGRITY_ALERTS")
+        alerts = cur.fetchone()[0]
+    except Exception:
+        alerts = "?"
     con.close()
     print(f"Loaded {n} events into Snowflake. Integrity alerts: {alerts}")
-    print(f"Database={os.getenv('SNOWFLAKE_DATABASE', 'SNOWPITCH')} warehouse ready.")
+    print(f"Database={os.getenv('SNOWFLAKE_DATABASE', 'SNOWPITCH')} warehouse ready via dbt.")
 
 
 def main() -> None:
