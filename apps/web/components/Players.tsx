@@ -5,7 +5,7 @@ import { useAnimations, useGLTF } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
-import { getKitMap, kitHex, type KitRole } from "@/lib/kitTexture";
+import { getNumberMap, kitHex, kitSkinHex, type KitRole } from "@/lib/kitTexture";
 import { PITCH } from "@/lib/pitch";
 
 export type PlayerAnim = "idle" | "run" | "kick" | "pass";
@@ -17,7 +17,6 @@ const availabilityCache = new Map<string, Promise<boolean>>();
 function checkModel(path: string): Promise<boolean> {
   const cached = availabilityCache.get(path);
   if (cached) return cached;
-  // GET (not HEAD): some static hosts/dev servers mishandle HEAD for binary assets
   const promise = fetch(path, { method: "GET", headers: { Range: "bytes=0-0" } })
     .then((r) => r.ok || r.status === 206)
     .catch(() => false);
@@ -46,12 +45,14 @@ export function JointedPlayer({
   kicking = false,
   anim = "run",
   number,
+  kitRole = "home",
 }: {
   color: string;
   phase?: Phase;
   kicking?: boolean;
   anim?: PlayerAnim;
   number?: number;
+  kitRole?: KitRole;
 }) {
   const group = useRef<THREE.Group>(null);
   const leftLeg = useRef<THREE.Group>(null);
@@ -59,6 +60,8 @@ export function JointedPlayer({
   const leftArm = useRef<THREE.Group>(null);
   const rightArm = useRef<THREE.Group>(null);
   const torso = useRef<THREE.Group>(null);
+  const numMap = useMemo(() => (number != null ? getNumberMap(number) : null), [number]);
+  const skin = kitSkinHex(kitRole);
 
   useFrame((state) => {
     const t = state.clock.elapsedTime;
@@ -84,48 +87,62 @@ export function JointedPlayer({
     }
   });
 
-  const mat = <meshStandardMaterial color={color} roughness={0.55} metalness={0.08} />;
+  const bodyMat = (
+    <meshStandardMaterial
+      color={color}
+      roughness={0.48}
+      metalness={0.05}
+      emissive={color}
+      emissiveIntensity={0.18}
+    />
+  );
+  const skinMat = <meshStandardMaterial color={skin} roughness={0.65} metalness={0.02} />;
 
   return (
     <group ref={group}>
       <group ref={torso} position={[0, 0.95, 0]}>
         <mesh castShadow position={[0, 0.15, 0]}>
           <capsuleGeometry args={[0.22, 0.45, 6, 10]} />
-          {mat}
+          {bodyMat}
         </mesh>
         <mesh castShadow position={[0, 0.62, 0]}>
           <sphereGeometry args={[0.18, 14, 14]} />
-          {mat}
+          {skinMat}
         </mesh>
         {number != null && (
           <mesh position={[0, 0.2, -0.24]}>
-            <planeGeometry args={[0.28, 0.32]} />
-            <meshBasicMaterial color="#f8faf8" toneMapped={false} />
+            <planeGeometry args={[0.3, 0.34]} />
+            <meshBasicMaterial
+              map={numMap || undefined}
+              color={numMap ? "#ffffff" : "#f8faf8"}
+              transparent={!!numMap}
+              toneMapped={false}
+            />
           </mesh>
         )}
         <group ref={leftArm} position={[-0.32, 0.25, 0]}>
           <mesh castShadow position={[0, -0.28, 0]}>
             <capsuleGeometry args={[0.07, 0.35, 4, 8]} />
-            {mat}
+            {bodyMat}
           </mesh>
         </group>
         <group ref={rightArm} position={[0.32, 0.25, 0]}>
           <mesh castShadow position={[0, -0.28, 0]}>
             <capsuleGeometry args={[0.07, 0.35, 4, 8]} />
-            {mat}
+            {bodyMat}
           </mesh>
         </group>
       </group>
       <group ref={leftLeg} position={[-0.12, 0.55, 0]}>
         <mesh castShadow position={[0, -0.32, 0]}>
           <capsuleGeometry args={[0.09, 0.4, 4, 8]} />
-          {mat}
+          {bodyMat}
         </mesh>
       </group>
       <group ref={rightLeg} position={[0.12, 0.55, 0]}>
         <mesh castShadow position={[0, -0.32, 0]}>
           <capsuleGeometry args={[0.09, 0.4, 4, 8]} />
-          {mat}
+          {bodyMat}
         </mesh>
       </group>
     </group>
@@ -136,10 +153,10 @@ function applyKit(
   root: THREE.Object3D,
   color: string,
   kitRole: KitRole,
-  number: number
+  _number: number
 ) {
   const team = new THREE.Color(color);
-  const kitMap = getKitMap(kitRole, number);
+  const skin = new THREE.Color(kitSkinHex(kitRole));
   root.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
     if (!mesh.isMesh) return;
@@ -154,23 +171,38 @@ function applyKit(
     }
     mesh.visible = true;
     mesh.frustumCulled = false;
+    const isSkin =
+      n.includes("head") ||
+      n.includes("face") ||
+      n.includes("skin") ||
+      n.includes("neck") ||
+      n.includes("hand") ||
+      n.includes("eyel") ||
+      n.includes("mouth");
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     mesh.material = mats.map((m) => {
-      const cloned = (m as THREE.MeshStandardMaterial).clone();
-      if ("color" in cloned && cloned.color) {
-        cloned.color.copy(team);
+      const src = m as THREE.MeshStandardMaterial;
+      const cloned =
+        src && "color" in src
+          ? src.clone()
+          : new THREE.MeshStandardMaterial({ color: team });
+      if (isSkin) {
+        if (cloned.color) cloned.color.copy(skin);
+        cloned.map = null;
+        cloned.roughness = 0.72;
+        cloned.metalness = 0.02;
+        if (cloned.emissive) cloned.emissive.set("#000000");
+      } else {
+        // Mixamo UVs ≠ flat kit canvas — tint original albedo instead of replacing map
+        if (cloned.color) cloned.color.copy(team).multiplyScalar(1.25);
+        if (cloned.emissive) cloned.emissive.copy(team).multiplyScalar(0.22);
+        cloned.roughness = 0.45;
+        cloned.metalness = 0.04;
       }
-      if (kitMap && "map" in cloned) {
-        // Tint via color; kit map as detail when UVs exist
-        cloned.map = kitMap;
-        cloned.color.set("#ffffff");
-      }
-      if ("emissive" in cloned && cloned.emissive) {
-        cloned.emissive.copy(team).multiplyScalar(0.04);
-      }
-      cloned.roughness = 0.55;
-      cloned.metalness = 0.05;
       cloned.side = THREE.DoubleSide;
+      cloned.transparent = false;
+      cloned.opacity = 1;
+      cloned.depthWrite = true;
       cloned.needsUpdate = true;
       return cloned;
     });
@@ -217,11 +249,29 @@ function GlbPlayer({
     const c = skeletonClone(gltf.scene);
     applyKit(c, color, kitRole, number);
     c.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(c);
-    const height = Math.max(0.001, box.max.y - box.min.y);
+    // SkinnedMesh AABB is unreliable before first skeleton update — prefer geometry bounds
+    let height = 0;
+    c.traverse((obj) => {
+      const mesh = obj as THREE.SkinnedMesh;
+      if (!(mesh as THREE.Mesh).isMesh) return;
+      const geom = mesh.geometry as THREE.BufferGeometry;
+      if (!geom) return;
+      geom.computeBoundingBox();
+      const gbox = geom.boundingBox;
+      if (!gbox) return;
+      const h = gbox.max.y - gbox.min.y;
+      if (h > height) height = h;
+    });
+    if (height < 0.3) {
+      const box = new THREE.Box3().setFromObject(c);
+      height = Math.max(0.3, box.max.y - box.min.y);
+    }
+    // Mixamo packs sometimes ship in centimetres (~170–180)
+    if (height > 50) height *= 0.01;
     const s = PITCH.playerHeight / height;
     c.scale.setScalar(s);
-    c.position.set(0, -box.min.y * s, 0);
+    const boxAfter = new THREE.Box3().setFromObject(c);
+    c.position.set(0, -boxAfter.min.y, 0);
     c.rotation.y = Math.PI;
     c.traverse((obj) => {
       const mesh = obj as THREE.SkinnedMesh;
@@ -229,11 +279,27 @@ function GlbPlayer({
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         mesh.frustumCulled = false;
+        mesh.visible = true;
       }
       if (mesh.isSkinnedMesh && mesh.skeleton) {
         mesh.skeleton.update();
       }
     });
+    const numMap = getNumberMap(number);
+    if (numMap) {
+      const plate = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.32, 0.38),
+        new THREE.MeshBasicMaterial({
+          map: numMap,
+          transparent: true,
+          toneMapped: false,
+          depthWrite: false,
+        })
+      );
+      plate.position.set(0, 1.25, -0.18);
+      plate.rotation.y = Math.PI;
+      c.add(plate);
+    }
     return c;
   }, [gltf.scene, color, kitRole, number]);
 
@@ -328,6 +394,14 @@ export function AnimatedPlayer({
   const lodState = useRef(true);
 
   useFrame(() => {
+    // Controlled player always keeps Mixamo GLB under broadcast framing
+    if (controlled) {
+      if (!lodState.current) {
+        lodState.current = true;
+        setUseGlb(true);
+      }
+      return;
+    }
     const g = groupRef.current;
     if (!g) return;
     const dist = camera.position.distanceTo(g.getWorldPosition(new THREE.Vector3()));
@@ -342,7 +416,18 @@ export function AnimatedPlayer({
 
   const body =
     available && useGlb ? (
-      <Suspense fallback={<JointedPlayer color={tint} phase={phase} kicking={kicking} anim={anim} number={number} />}>
+      <Suspense
+        fallback={
+          <JointedPlayer
+            color={tint}
+            phase={phase}
+            kicking={kicking}
+            anim={anim}
+            number={number}
+            kitRole={role}
+          />
+        }
+      >
         <GlbPlayer
           color={tint}
           phase={phase}
@@ -354,7 +439,14 @@ export function AnimatedPlayer({
         />
       </Suspense>
     ) : (
-      <JointedPlayer color={tint} phase={phase} kicking={kicking} anim={anim} number={number} />
+      <JointedPlayer
+        color={tint}
+        phase={phase}
+        kicking={kicking}
+        anim={anim}
+        number={number}
+        kitRole={role}
+      />
     );
 
   return (

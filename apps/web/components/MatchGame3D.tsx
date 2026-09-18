@@ -147,10 +147,12 @@ function BroadcastCamera({
   stateRef: React.MutableRefObject<SceneState>;
 }) {
   const { camera } = useThree();
-  const desired = useRef(new THREE.Vector3(0, 28, 72));
-  const look = useRef(new THREE.Vector3());
+  const desired = useRef(new THREE.Vector3(0, 20, 56));
+  const look = useRef(new THREE.Vector3(0, 1, 0));
   const camX = useRef(0);
-  const baseFov = useRef(42);
+  const camY = useRef(20);
+  const camZ = useRef(56);
+  const baseFov = useRef(40);
 
   useFrame((state, delta) => {
     const s = stateRef.current;
@@ -160,27 +162,37 @@ function BroadcastCamera({
     if (s.camMode === "replay") {
       const rt = (t - (s.lastGoalAt || 0)) * 0.55;
       desired.current.set(
-        s.ball.x + Math.sin(rt) * 18,
-        8,
-        s.ball.z + Math.cos(rt) * 18
+        s.ball.x + Math.sin(rt) * 16,
+        7,
+        s.ball.z + Math.cos(rt) * 16
       );
       look.current.copy(s.ball);
       baseFov.current = 42;
     } else if (s.camMode === "goal") {
-      desired.current.set(s.ball.x * 0.4, 6, s.ball.z + 14);
+      desired.current.set(s.ball.x * 0.35, 5.5, s.ball.z + 12);
       look.current.copy(s.ball);
       baseFov.current = 38;
     } else {
-      // Side-on broadcast — tracks ball.x with velocity lead
-      const lead = THREE.MathUtils.clamp(s.ballVel.x * 0.35, -8, 8);
-      const targetX = THREE.MathUtils.clamp(s.ball.x + lead, -30, 30);
-      camX.current = THREE.MathUtils.damp(camX.current, targetX, 2.2, delta);
-      desired.current.set(camX.current, 28, 72);
-      look.current.set(camX.current * 0.35 + s.ball.x * 0.65, 0.6, s.ball.z * 0.25);
-      baseFov.current = 42;
+      // Outside the bowl (stands ~z±42); clear the near tier onto the pitch
+      const speed = s.ballVel.length();
+      const lead = THREE.MathUtils.clamp(s.ballVel.x * 0.4, -10, 10);
+      const targetX = THREE.MathUtils.clamp(s.ball.x + lead, -28, 28);
+      camX.current = THREE.MathUtils.damp(camX.current, targetX, 2.4, delta);
+      const attack = THREE.MathUtils.clamp(s.ball.x / PITCH.halfX, -1, 1);
+      const wantY = 18 + Math.min(4, speed * 0.12) + Math.abs(attack) * 2.5;
+      const wantZ = 54 + Math.min(8, speed * 0.25) - Math.abs(attack) * 2;
+      camY.current = THREE.MathUtils.damp(camY.current, wantY, 1.6, delta);
+      camZ.current = THREE.MathUtils.damp(camZ.current, wantZ, 1.6, delta);
+      desired.current.set(camX.current, camY.current, camZ.current);
+      look.current.set(
+        camX.current * 0.2 + s.ball.x * 0.8,
+        1.0 + Math.abs(s.ball.y) * 0.15,
+        s.ball.z * 0.55
+      );
+      baseFov.current = THREE.MathUtils.clamp(40 + speed * 0.12, 40, 44);
     }
 
-    camera.position.lerp(desired.current, 1 - Math.exp(-2.8 * delta));
+    camera.position.lerp(desired.current, 1 - Math.exp(-3.0 * delta));
     camera.lookAt(look.current);
 
     if (s.fovPunch && s.fovPunch > 0) {
@@ -254,6 +266,12 @@ function MatchScene({
   const [animPhase, setAnimPhase] = useState<Phase>(stateRef.current.phase);
   const [playerAnim, setPlayerAnim] = useState<PlayerAnim>("idle");
   const [ctrlIdx, setCtrlIdx] = useState(stateRef.current.controlledIdx);
+  const [awayAnims, setAwayAnims] = useState<PlayerAnim[]>(() => AWAY_SPOTS.map(() => "idle"));
+  const [homeAnims, setHomeAnims] = useState<PlayerAnim[]>(() => HOME_SPOTS.map(() => "idle"));
+  const homeAnimsRef = useRef<PlayerAnim[]>(HOME_SPOTS.map(() => "idle"));
+  const awayAnimsRef = useRef<PlayerAnim[]>(AWAY_SPOTS.map(() => "idle"));
+  const prevAway = useRef(AWAY_SPOTS.map((s) => new THREE.Vector3(...s)));
+  const prevHome = useRef(HOME_SPOTS.map((s) => new THREE.Vector3(...s)));
   const shootLatch = useRef(false);
   const passLatch = useRef(false);
   const lobLatch = useRef(false);
@@ -697,6 +715,39 @@ function MatchScene({
     separatePlayers(awayPos.current);
     s.player.copy(homePos.current[s.controlledIdx]);
 
+    // Idle vs run for AI based on movement
+    let homeDirty = false;
+    let awayDirty = false;
+    const nextHome = homeAnimsRef.current.slice();
+    const nextAway = awayAnimsRef.current.slice();
+    homePos.current.forEach((p, i) => {
+      if (i === s.controlledIdx) return;
+      const moved = p.distanceTo(prevHome.current[i]) > 0.025;
+      const next: PlayerAnim = moved ? "run" : "idle";
+      if (nextHome[i] !== next) {
+        nextHome[i] = next;
+        homeDirty = true;
+      }
+      prevHome.current[i].copy(p);
+    });
+    awayPos.current.forEach((p, i) => {
+      const moved = p.distanceTo(prevAway.current[i]) > 0.025;
+      const next: PlayerAnim = moved ? "run" : "idle";
+      if (nextAway[i] !== next) {
+        nextAway[i] = next;
+        awayDirty = true;
+      }
+      prevAway.current[i].copy(p);
+    });
+    if (homeDirty) {
+      homeAnimsRef.current = nextHome;
+      setHomeAnims(nextHome);
+    }
+    if (awayDirty) {
+      awayAnimsRef.current = nextAway;
+      setAwayAnims(nextAway);
+    }
+
     if (s.minute > 25 && Math.random() < delta * 0.015 && s.possession !== "home") {
       s.ballVel.x -= 1.5 * delta * 40;
     }
@@ -712,23 +763,25 @@ function MatchScene({
 
   return (
     <>
-      <color attach="background" args={["#1a2838"]} />
-      <fog attach="fog" args={["#1a2838", 160, 480]} />
+      <color attach="background" args={["#0e1824"]} />
+      <fog attach="fog" args={["#0e1824", 90, 320]} />
       {hdriOk ? (
         <Environment files="/hdri/night.hdr" background={false} />
       ) : (
         <Environment preset="night" background={false} />
       )}
-      <ambientLight intensity={0.72} />
-      <hemisphereLight args={["#d8e4f0", "#2a3848", 0.7]} />
+      <ambientLight intensity={0.32} />
+      <hemisphereLight args={["#a8c0d8", "#1a2430", 0.45]} />
       <directionalLight
         ref={dirLight}
         castShadow
-        position={[28, 48, 22]}
-        intensity={2.8}
-        color="#f4f7fa"
+        position={[22, 42, 18]}
+        intensity={1.55}
+        color="#c8d8e8"
       />
-      <Floodlights withShafts={quality.tier !== "low"} />
+      {/* Soft fill so players/pitch read when flood pools miss a patch */}
+      <directionalLight position={[-12, 28, -20]} intensity={0.35} color="#8aa4bc" />
+      <Floodlights withShafts={quality.tier !== "low"} shadowMapSize={quality.shadowMapSize} />
       {showSnow && (
         <SnowStorm
           near={Math.floor(quality.particlesNear * 0.35)}
@@ -739,7 +792,7 @@ function MatchScene({
       <Crowd count={quality.crowdCount} />
       <GroundAtmosphere />
 
-      <Trail width={0.35} length={4} color="#e8f4ff" attenuation={(w) => w * w}>
+      <Trail width={0.06} length={1.4} color="#c8d8e4" attenuation={(w) => w * w * 0.18}>
         <group ref={ballRef} position={[0, BALL_R, 0]}>
           <BallModel />
         </group>
@@ -757,7 +810,7 @@ function MatchScene({
             kitRole={i === 0 ? "gk" : "home"}
             number={HOME_NUMBERS[i]}
             phase={animPhase === "ready" ? "ready" : "run"}
-            anim={i === ctrlIdx ? playerAnim : "run"}
+            anim={i === ctrlIdx ? playerAnim : homeAnims[i] || "idle"}
             controlled={i === ctrlIdx}
             kicking={i === ctrlIdx && (playerAnim === "kick" || playerAnim === "pass")}
             lodNear={quality.lodNear}
@@ -778,8 +831,8 @@ function MatchScene({
           <AnimatedPlayer
             kitRole={i === 0 ? "gk" : "away"}
             number={AWAY_NUMBERS[i]}
-            phase="run"
-            anim="run"
+            phase={animPhase === "ready" ? "ready" : "run"}
+            anim={awayAnims[i] || "idle"}
             lodNear={quality.lodNear}
             lodFar={quality.lodFar}
             animOffset={i * 0.41 + 1.2}
@@ -790,15 +843,20 @@ function MatchScene({
       <BroadcastCamera stateRef={stateRef} />
 
       <EffectComposer enableNormalPass>
-        <N8AO aoRadius={quality.aoRadius} intensity={0.85} distanceFalloff={1.2} />
-        <Bloom intensity={0.22} luminanceThreshold={0.75} mipmapBlur />
+        <N8AO
+          aoRadius={quality.aoRadius}
+          aoSamples={quality.aoSamples}
+          intensity={1.05}
+          distanceFalloff={1.15}
+        />
+        <Bloom intensity={0.32} luminanceThreshold={0.78} mipmapBlur />
         <FocusDoF stateRef={stateRef} />
         <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
-        <HueSaturation saturation={0.05} hue={-0.01} />
-        <BrightnessContrast brightness={0.08} contrast={0.04} />
+        <HueSaturation saturation={0.04} hue={-0.015} />
+        <BrightnessContrast brightness={-0.02} contrast={0.1} />
         <Vignette
-          offset={0.32}
-          darkness={Math.min(vignette, 0.45)}
+          offset={0.3}
+          darkness={Math.min(vignette, 0.55)}
           blendFunction={
             stateRef.current.riggedPulse ? BlendFunction.COLOR_BURN : BlendFunction.NORMAL
           }
@@ -1200,7 +1258,7 @@ export function MatchGame({ profile }: { profile: Profile }) {
   });
 
   const camera = useMemo(
-    () => ({ position: [0, 28, 72] as [number, number, number], fov: 42 }),
+    () => ({ position: [0, 20, 56] as [number, number, number], fov: 40 }),
     []
   );
 
@@ -1226,9 +1284,11 @@ export function MatchGame({ profile }: { profile: Profile }) {
               shadows
               dpr={[1, quality.dprMax]}
               camera={camera}
-              onCreated={({ gl }) => {
+              onCreated={({ gl, camera: cam }) => {
                 gl.toneMapping = THREE.NoToneMapping;
                 gl.toneMappingExposure = 1;
+                cam.position.set(0, 20, 56);
+                cam.lookAt(0, 1, 0);
               }}
               style={{ width: "100%", height: 560 }}
             >

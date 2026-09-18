@@ -22,22 +22,52 @@ function createSoftParticleTexture(): THREE.CanvasTexture {
 }
 
 function createSpectatorTexture(): THREE.CanvasTexture {
+  // Atlas of thicker silhouettes — denser read at broadcast distance
+  const cols = 4;
+  const w = 48;
+  const h = 64;
   const canvas = document.createElement("canvas");
-  canvas.width = 32;
-  canvas.height = 48;
+  canvas.width = w * cols;
+  canvas.height = h;
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#2a3038";
-  ctx.fillRect(8, 18, 16, 28);
-  ctx.beginPath();
-  ctx.arc(16, 12, 7, 0, Math.PI * 2);
-  ctx.fillStyle = "#c8b090";
-  ctx.fill();
+  const bodies = ["#1a2230", "#243044", "#2c3848", "#1e2838"];
+  const heads = ["#c4a882", "#b89870", "#d0b090", "#a88868"];
+  for (let i = 0; i < cols; i++) {
+    const ox = i * w;
+    ctx.fillStyle = bodies[i];
+    // Broader torso + legs for thicker silhouette
+    ctx.fillRect(ox + 12, 22, 24, 36);
+    ctx.fillRect(ox + 14, 52, 8, 12);
+    ctx.fillRect(ox + 26, 52, 8, 12);
+    // Shoulders
+    ctx.fillRect(ox + 8, 24, 8, 14);
+    ctx.fillRect(ox + 32, 24, 8, 14);
+    ctx.beginPath();
+    ctx.arc(ox + 24, 14, 9, 0, Math.PI * 2);
+    ctx.fillStyle = heads[i];
+    ctx.fill();
+  }
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
   return tex;
 }
 
-export function Floodlights({ withShafts = true }: { withShafts?: boolean }) {
+export function Floodlights({
+  withShafts = true,
+  shadowMapSize = 1024,
+}: {
+  withShafts?: boolean;
+  shadowMapSize?: number;
+}) {
+  const mapSize = Math.min(2048, Math.max(512, shadowMapSize));
+  // World-space aim points on pitch thirds (must NOT be local to the pole group)
+  const aims: [number, number, number][] = [
+    [-18, 0.1, -12],
+    [18, 0.1, -12],
+    [-18, 0.1, 12],
+    [18, 0.1, 12],
+  ];
   const corners: [number, number, number][] = [
     [-PITCH.halfX - 4, 18, -PITCH.halfZ - 4],
     [PITCH.halfX + 4, 18, -PITCH.halfZ - 4],
@@ -47,53 +77,89 @@ export function Floodlights({ withShafts = true }: { withShafts?: boolean }) {
   return (
     <group>
       {corners.map((pos, i) => (
-        <group key={i} position={pos}>
-          <mesh castShadow>
-            <cylinderGeometry args={[0.35, 0.45, 16, 8]} />
-            <meshStandardMaterial color="#2a3034" metalness={0.65} roughness={0.35} />
-          </mesh>
-          <mesh position={[0, 8.5, 0]}>
-            <boxGeometry args={[2.4, 0.55, 1.2]} />
-            <meshStandardMaterial
-              color="#c9d6de"
-              emissive="#a8c0d0"
-              emissiveIntensity={2.8}
-              metalness={0.4}
-              roughness={0.3}
+        <FloodRig
+          key={i}
+          pos={pos}
+          aim={aims[i]}
+          mapSize={mapSize}
+          withShafts={withShafts}
+        />
+      ))}
+    </group>
+  );
+}
+
+function FloodRig({
+  pos,
+  aim,
+  mapSize,
+  withShafts,
+}: {
+  pos: [number, number, number];
+  aim: [number, number, number];
+  mapSize: number;
+  withShafts: boolean;
+}) {
+  const lightRef = useRef<THREE.SpotLight>(null);
+  const targetRef = useRef<THREE.Object3D>(null);
+
+  useEffect(() => {
+    const light = lightRef.current;
+    const target = targetRef.current;
+    if (!light || !target) return;
+    light.target = target;
+    light.target.updateMatrixWorld();
+  }, []);
+
+  return (
+    <group>
+      <object3D ref={targetRef} position={aim} />
+      <group position={pos}>
+        <mesh castShadow>
+          <cylinderGeometry args={[0.35, 0.45, 16, 8]} />
+          <meshStandardMaterial color="#2a3034" metalness={0.65} roughness={0.35} />
+        </mesh>
+        <mesh position={[0, 8.5, 0]}>
+          <boxGeometry args={[2.4, 0.55, 1.2]} />
+          <meshStandardMaterial
+            color="#c9d6de"
+            emissive="#a8c0d0"
+            emissiveIntensity={3.2}
+            metalness={0.4}
+            roughness={0.3}
+          />
+        </mesh>
+        <mesh position={[0, 8.7, 0]}>
+          <sphereGeometry args={[0.7, 12, 12]} />
+          <meshBasicMaterial color="#e8f4ff" transparent opacity={0.45} depthWrite={false} />
+        </mesh>
+        <spotLight
+          ref={lightRef}
+          position={[0, 8.7, 0]}
+          angle={0.62}
+          penumbra={0.45}
+          intensity={280}
+          distance={140}
+          castShadow
+          color="#eef4fa"
+          shadow-bias={-0.00035}
+          shadow-mapSize-width={mapSize}
+          shadow-mapSize-height={mapSize}
+        />
+        {withShafts && (
+          <mesh position={[0, 3, 0]} rotation={[Math.PI, 0, 0]}>
+            <coneGeometry args={[9, 15, 24, 1, true]} />
+            <meshBasicMaterial
+              color="#c8daf0"
+              transparent
+              opacity={0.055}
+              depthWrite={false}
+              side={THREE.DoubleSide}
+              blending={THREE.AdditiveBlending}
             />
           </mesh>
-          <mesh position={[0, 8.7, 0]}>
-            <sphereGeometry args={[0.7, 12, 12]} />
-            <meshBasicMaterial color="#e8f4ff" transparent opacity={0.4} depthWrite={false} />
-          </mesh>
-          <spotLight
-            position={[0, 8.7, 0]}
-            angle={0.65}
-            penumbra={0.5}
-            intensity={180}
-            distance={140}
-            castShadow
-            color="#f0f4f8"
-            shadow-bias={-0.0004}
-            shadow-mapSize-width={1024}
-            shadow-mapSize-height={1024}
-            target-position={[0, 0, 0]}
-          />
-          {withShafts && (
-            <mesh position={[0, 3, 0]} rotation={[Math.PI, 0, 0]}>
-              <coneGeometry args={[10, 16, 24, 1, true]} />
-              <meshBasicMaterial
-                color="#c8daf0"
-                transparent
-                opacity={0.045}
-                depthWrite={false}
-                side={THREE.DoubleSide}
-                blending={THREE.AdditiveBlending}
-              />
-            </mesh>
-          )}
-        </group>
-      ))}
+        )}
+      </group>
     </group>
   );
 }
@@ -224,12 +290,17 @@ export function Crowd({ count = 2000 }: { count?: number }) {
     for (let i = 0; i < count; i++) a[i] = Math.random() * Math.PI * 2;
     return a;
   }, [count]);
+  const atlasOffsets = useMemo(() => {
+    const a = new Float32Array(count);
+    for (let i = 0; i < count; i++) a[i] = Math.floor(Math.random() * 4) / 4;
+    return a;
+  }, [count]);
 
   useEffect(() => {
     const mesh = meshRef.current;
     if (!mesh) return;
     let i = 0;
-    const rows = 8;
+    const rows = 10;
     const banks = 4;
     const perBank = Math.floor(count / banks);
     const perRow = Math.floor(perBank / rows);
@@ -243,22 +314,25 @@ export function Crowd({ count = 2000 }: { count?: number }) {
       const base = axis === "z" ? PITCH.halfZ + 2.2 : PITCH.halfX + 2.2;
       for (let row = 0; row < rows; row++) {
         for (let seat = 0; seat < perRow && i < count; seat++, i++) {
-          const along = (seat / Math.max(1, perRow - 1) - 0.5) * span;
-          const y = 1.5 + row * 0.58;
-          const out = base + row * 0.72;
+          const jitter = (Math.random() - 0.5) * 0.35;
+          const along = (seat / Math.max(1, perRow - 1) - 0.5) * span + jitter;
+          const y = 1.45 + row * 0.52;
+          const out = base + row * 0.68;
           if (axis === "z") {
             dummy.position.set(along, y, sign * out);
           } else {
             dummy.position.set(sign * out, y, along);
           }
-          dummy.scale.set(1, 1, 1);
+          // Thicker billboards — fewer empty gaps at broadcast distance
+          const s = 1.15 + Math.random() * 0.35;
+          dummy.scale.set(s * 0.85, s, 1);
           dummy.lookAt(0, y, 0);
           dummy.updateMatrix();
           mesh.setMatrixAt(i, dummy.matrix);
           color.setRGB(
-            palette[0] * (0.65 + Math.random() * 0.35),
-            palette[1] * (0.65 + Math.random() * 0.35),
-            palette[2] * (0.65 + Math.random() * 0.35)
+            palette[0] * (0.55 + Math.random() * 0.45),
+            palette[1] * (0.55 + Math.random() * 0.45),
+            palette[2] * (0.55 + Math.random() * 0.45)
           );
           mesh.setColorAt(i, color);
         }
@@ -282,7 +356,8 @@ export function Crowd({ count = 2000 }: { count?: number }) {
 
     const geom = mesh.geometry as THREE.BufferGeometry;
     geom.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phases, 1));
-  }, [count, color, dummy, phases]);
+    geom.setAttribute("aAtlas", new THREE.InstancedBufferAttribute(atlasOffsets, 1));
+  }, [count, color, dummy, phases, atlasOffsets]);
 
   const onBeforeCompile = (shader: THREE.WebGLProgramParametersWithUniforms) => {
     shader.uniforms.uTime = { value: 0 };
@@ -291,12 +366,29 @@ export function Crowd({ count = 2000 }: { count?: number }) {
         "#include <common>",
         `#include <common>
          attribute float aPhase;
+         attribute float aAtlas;
+         varying float vAtlas;
          uniform float uTime;`
       )
       .replace(
         "#include <begin_vertex>",
         `#include <begin_vertex>
-         transformed.y += sin(uTime * 2.2 + aPhase) * 0.08;`
+         transformed.y += sin(uTime * 2.2 + aPhase) * 0.08;
+         vAtlas = aAtlas;`
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+         varying float vAtlas;`
+      )
+      .replace(
+        "#include <map_fragment>",
+        `#ifdef USE_MAP
+         vec2 atlasUv = vec2(vMapUv.x * 0.25 + vAtlas, vMapUv.y);
+         vec4 sampledDiffuseColor = texture2D(map, atlasUv);
+         diffuseColor *= sampledDiffuseColor;
+         #endif`
       );
     (meshRef.current as any).__crowdShader = shader;
   };
@@ -310,11 +402,11 @@ export function Crowd({ count = 2000 }: { count?: number }) {
 
   return (
     <instancedMesh ref={meshRef} args={[undefined, undefined, count]} castShadow frustumCulled={false}>
-      <planeGeometry args={[0.45, 0.75]} />
+      <planeGeometry args={[0.55, 0.95]} />
       <meshStandardMaterial
         map={spectatorTex}
         transparent
-        alphaTest={0.2}
+        alphaTest={0.15}
         roughness={0.85}
         onBeforeCompile={onBeforeCompile}
       />

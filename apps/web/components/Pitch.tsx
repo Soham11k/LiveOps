@@ -58,9 +58,8 @@ function useLinearTextureOptional(path: string): THREE.Texture | null {
   return tex;
 }
 
-/** PBR turf with mow stripes, wear noise, and light late-match snow. */
+/** PBR turf with lit markings overlay, mow stripes, wear, wet sheen, and light snow. */
 export function Pitch({ snowAmount = 0 }: { snowAmount?: number }) {
-  const matRef = useRef<THREE.MeshStandardMaterial>(null);
   const snowUniform = useMemo(() => ({ value: 0 }), []);
   const colorMap = useTextureOptional("/textures/grass/color.jpg");
   const normalMap = useLinearTextureOptional("/textures/grass/normal.jpg");
@@ -72,11 +71,11 @@ export function Pitch({ snowAmount = 0 }: { snowAmount?: number }) {
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 8;
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
     return tex;
   }, []);
 
   useEffect(() => {
-    // ~3 m per blade tile on a 105×68 pitch
     const rx = 35;
     const ry = 23;
     if (colorMap) {
@@ -122,7 +121,6 @@ export function Pitch({ snowAmount = 0 }: { snowAmount?: number }) {
       .replace(
         "#include <color_fragment>",
         `#include <color_fragment>
-         // Three r152+ map UVs are vMapUv (vUv is undeclared → black turf)
          #ifdef USE_MAP
          vec2 stripeUv = vMapUv;
          #elif defined( USE_UV )
@@ -137,6 +135,19 @@ export function Pitch({ snowAmount = 0 }: { snowAmount?: number }) {
          vec3 snowCol = vec3(0.86, 0.90, 0.94);
          float snowMask = smoothstep(0.25, 0.9, uSnow) * (0.4 + 0.4 * wear);
          diffuseColor.rgb = mix(diffuseColor.rgb, snowCol, clamp(snowMask, 0.0, 0.55));`
+      )
+      .replace(
+        "#include <roughnessmap_fragment>",
+        `#include <roughnessmap_fragment>
+         #ifdef USE_MAP
+         vec2 wetUv = vMapUv;
+         #elif defined( USE_UV )
+         vec2 wetUv = vUv;
+         #else
+         vec2 wetUv = vec2(0.5);
+         #endif
+         float wet = 0.28 + 0.35 * noise(wetUv * 0.45) + 0.2 * noise(wetUv * 1.4);
+         roughnessFactor = mix(roughnessFactor, 0.34, clamp(wet, 0.0, 0.65));`
       );
   };
 
@@ -145,20 +156,32 @@ export function Pitch({ snowAmount = 0 }: { snowAmount?: number }) {
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]} receiveShadow>
         <planeGeometry args={[PITCH.length, PITCH.width]} />
         <meshStandardMaterial
-          ref={matRef}
           color={colorMap ? "#6a9a72" : "#3a7a4a"}
           map={colorMap || undefined}
           normalMap={normalMap || undefined}
           roughnessMap={roughMap || undefined}
-          roughness={0.85}
-          metalness={0.02}
+          roughness={0.72}
+          metalness={0.04}
+          envMapIntensity={0.35}
           onBeforeCompile={onBeforeCompile}
         />
       </mesh>
+      {/* Lit markings — MeshStandard so floods/shadows hit the lines */}
       {markings && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, 0]} receiveShadow>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} receiveShadow>
           <planeGeometry args={[PITCH.length, PITCH.width]} />
-          <meshBasicMaterial map={markings} transparent depthWrite={false} />
+          <meshStandardMaterial
+            map={markings}
+            transparent
+            alphaTest={0.08}
+            depthWrite={false}
+            roughness={0.55}
+            metalness={0.08}
+            emissive="#e8f0e4"
+            emissiveIntensity={0.12}
+            polygonOffset
+            polygonOffsetFactor={-1}
+          />
         </mesh>
       )}
     </group>

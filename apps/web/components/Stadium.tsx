@@ -223,6 +223,21 @@ function StandTier({
 }) {
   const along = axis === "z" ? PITCH.length + 4 : PITCH.width + 2;
   const base = axis === "z" ? PITCH.halfZ + 1.8 : PITCH.halfX + 1.8;
+  // Slight per-row concrete variance so stands aren't flat grey boxes
+  const rowMats = useMemo(() => {
+    return Array.from({ length: rows }).map((_, i) => {
+      const t = i / Math.max(1, rows - 1);
+      const r = 0.18 + t * 0.06 + (i % 3) * 0.02;
+      const g = 0.22 + t * 0.05 + (i % 2) * 0.015;
+      const b = 0.26 + t * 0.04;
+      const hex = new THREE.Color(r, g, b).getStyle();
+      return {
+        color: hex,
+        roughness: 0.72 + (i % 4) * 0.05,
+        metalness: 0.04 + (i % 3) * 0.02,
+      };
+    });
+  }, [rows]);
 
   return (
     <group>
@@ -233,10 +248,15 @@ function StandTier({
           axis === "z" ? [0, rise, sign * out] : [sign * out, rise, 0];
         const geo: [number, number, number] =
           axis === "z" ? [along, 0.5, 0.7] : [0.7, 0.5, along * 0.92];
+        const mat = rowMats[i];
         return (
           <mesh key={i} position={pos} castShadow receiveShadow>
             <boxGeometry args={geo} />
-            <meshStandardMaterial color={i % 2 === 0 ? "#3a4650" : "#2e3842"} roughness={0.85} />
+            <meshStandardMaterial
+              color={mat.color}
+              roughness={mat.roughness}
+              metalness={mat.metalness}
+            />
           </mesh>
         );
       })}
@@ -252,7 +272,7 @@ function StandTier({
         <boxGeometry
           args={axis === "z" ? [along + 2, 5.2, 0.9] : [0.9, 5.2, along * 0.95]}
         />
-        <meshStandardMaterial color="#2a343c" roughness={0.8} />
+        <meshStandardMaterial color="#243038" roughness={0.78} metalness={0.06} />
       </mesh>
     </group>
   );
