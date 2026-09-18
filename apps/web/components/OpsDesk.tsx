@@ -61,6 +61,7 @@ export function OpsDesk() {
   const [busy, setBusy] = useState(false);
 
   async function load() {
+    setError("");
     try {
       const [a, f, p, c, q] = await Promise.all([
         api.alerts(),
@@ -162,7 +163,14 @@ export function OpsDesk() {
         title="Incident queue"
         lineage="Game → API → bronze → dbt → gold → alerts"
       />
-      {error && <p className="error">{error}</p>}
+      {error && (
+        <p className="error">
+          {error}{" "}
+          <button type="button" className="btn ghost" onClick={() => { setLoading(true); load(); }}>
+            Retry
+          </button>
+        </p>
+      )}
 
       <div className="incident-filters">
         {(["open", "ack", "resolved", "all"] as Filter[]).map((f) => (
@@ -175,6 +183,9 @@ export function OpsDesk() {
             {f}
           </button>
         ))}
+        <button type="button" className="btn ghost" style={{ marginLeft: 8 }} disabled={loading} onClick={() => { setLoading(true); load(); }}>
+          Refresh
+        </button>
         <span className="muted" style={{ marginLeft: "auto" }}>
           {filtered.length} / {allRows.length}
         </span>
@@ -196,17 +207,22 @@ export function OpsDesk() {
                 </tr>
               </thead>
               <tbody>
-                {loading && (
-                  <tr>
-                    <td colSpan={7} className="muted">
-                      Reading gold marts…
-                    </td>
-                  </tr>
-                )}
+                {loading &&
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <tr key={`sk-${i}`} className="skeleton-row">
+                      <td colSpan={7}>
+                        <div className="skeleton-line" />
+                      </td>
+                    </tr>
+                  ))}
                 {!loading && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="muted">
-                      No incidents in this filter. Seed the warehouse or clear filters.
+                    <td colSpan={7} className="empty-state">
+                      <p className="muted">No incidents in this filter.</p>
+                      <p className="lede">From the project root: <code>make seed</code> then refresh marts.</p>
+                      <button type="button" className="btn" onClick={() => { setLoading(true); load(); }}>
+                        Retry load
+                      </button>
                     </td>
                   </tr>
                 )}

@@ -8,8 +8,10 @@ import * as THREE from "three";
 import { api } from "@/lib/api";
 import { Stadium } from "@/components/Stadium";
 import { BallModel } from "@/components/Models";
-import { Floodlights, GroundAtmosphere } from "@/components/StadiumFX";
+import { Crowd, Floodlights, GroundAtmosphere } from "@/components/StadiumFX";
+import { MatchPost } from "@/components/MatchPost";
 import { BroadcastHeader } from "@/components/BroadcastHeader";
+import { getQuality } from "@/lib/quality";
 import { PITCH } from "@/lib/pitch";
 
 type Tick = {
@@ -36,24 +38,27 @@ function ReplayScene({
 }) {
   const ballRef = useRef<THREE.Group>(null);
   const tick = ticks[index] || ticks[0];
+  const quality = useMemo(() => getQuality("medium"), []);
 
   useFrame(({ camera }) => {
     if (!tick || !ballRef.current) return;
     const y = tick.ball_y ?? PITCH.ballRadius;
     ballRef.current.position.set(tick.ball_x, y, tick.ball_z);
-    camera.position.lerp(new THREE.Vector3(tick.ball_x * 0.25, 22, 60), 0.08);
+    camera.position.lerp(new THREE.Vector3(tick.ball_x * 0.25, 20, 56), 0.08);
     camera.lookAt(tick.ball_x, 0.5, tick.ball_z);
   });
 
   return (
     <>
-      <color attach="background" args={["#0c141c"]} />
-      <fog attach="fog" args={["#0c141c", 120, 400]} />
+      <color attach="background" args={["#0e1824"]} />
+      <fog attach="fog" args={["#0e1824", 90, 320]} />
       <Environment preset="night" background={false} />
-      <ambientLight intensity={0.4} />
-      <directionalLight castShadow position={[28, 48, 22]} intensity={2.2} color="#f0f4f8" />
-      <Floodlights withShafts={false} />
+      <ambientLight intensity={0.32} />
+      <hemisphereLight args={["#a8c0d8", "#1a2430", 0.45]} />
+      <directionalLight castShadow position={[22, 42, 18]} intensity={1.55} color="#c8d8e8" />
+      <Floodlights withShafts={false} shadowMapSize={quality.shadowMapSize} />
       <Stadium snowAmount={0.05} />
+      <Crowd count={Math.min(quality.crowdCount, 1800)} castShadow={false} />
       <GroundAtmosphere />
       <group ref={ballRef}>
         <BallModel />
@@ -64,6 +69,7 @@ function ReplayScene({
           </mesh>
         )}
       </group>
+      <MatchPost quality={quality} vignette={0.2} slim />
     </>
   );
 }
@@ -77,29 +83,36 @@ export default function ReplayPage() {
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState("");
+  const [loadingTicks, setLoadingTicks] = useState(false);
+  const [loadingFlagged, setLoadingFlagged] = useState(true);
 
   useEffect(() => {
+    setLoadingFlagged(true);
     api
       .flaggedMatches()
       .then((rows) => {
         setFlagged(rows);
         if (rows[0]?.match_id) setMatchId(rows[0].match_id);
       })
-      .catch((e) => setError(String(e.message || e)));
+      .catch((e) => setError(String(e.message || e)))
+      .finally(() => setLoadingFlagged(false));
   }, []);
 
   useEffect(() => {
     if (!matchId) return;
     setPlaying(false);
     setIndex(0);
+    setLoadingTicks(true);
     api
       .replay(matchId)
       .then((r) => {
         setTicks(r.ticks || []);
         setTeleports(r.teleports || 0);
         setSource(r.source || "silver.match_ticks");
+        setError("");
       })
-      .catch((e) => setError(String(e.message || e)));
+      .catch((e) => setError(String(e.message || e)))
+      .finally(() => setLoadingTicks(false));
   }, [matchId]);
 
   useEffect(() => {
@@ -123,7 +136,7 @@ export default function ReplayPage() {
   const current = ticks[index];
 
   return (
-    <main>
+    <main className="replay-page">
       <BroadcastHeader
         kicker="Ops · tick forensics"
         title="Replay"
@@ -138,18 +151,34 @@ export default function ReplayPage() {
         <Link href="/play">Match</Link>
       </p>
 
-      {error && <p className="error">{error}</p>}
+      {error && (
+        <p className="error">
+          {error}{" "}
+          <button type="button" className="btn ghost" onClick={() => window.location.reload()}>
+            Retry
+          </button>
+        </p>
+      )}
 
       <div className="row">
         <div className="card" style={{ flex: 2 }}>
           <div className="pitch-wrap pitch-3d broadcast-pitch">
-            <Canvas shadows camera={{ position: [0, 22, 60], fov: 28 }} style={{ height: 480 }}>
+            {loadingTicks && (
+              <div className="pitch-loading">Loading ticks…</div>
+            )}
+            <Canvas
+              shadows
+              camera={{ position: [0, 20, 56], fov: 40 }}
+              className="match-canvas"
+              style={{ width: "100%", height: "min(70vh, 720px)" }}
+            >
               {ticks.length > 0 && <ReplayScene ticks={ticks} index={index} />}
             </Canvas>
           </div>
-          <div style={{ marginTop: 12 }}>
+          <div className="replay-scrubber">
             <input
               type="range"
+              className="replay-range"
               min={0}
               max={Math.max(0, ticks.length - 1)}
               value={index}
@@ -157,34 +186,19 @@ export default function ReplayPage() {
                 setPlaying(false);
                 setIndex(Number(e.target.value));
               }}
-              style={{ width: "100%" }}
             />
-            <div
-              style={{
-                position: "relative",
-                height: 8,
-                marginTop: 4,
-                background: "#1a2228",
-                borderRadius: 4,
-              }}
-            >
+            <div className="replay-marks">
               {teleportMarks.map((i) => (
                 <span
                   key={i}
+                  className="replay-mark"
                   title={`Teleport @ tick ${ticks[i]?.tick_ms}ms`}
-                  style={{
-                    position: "absolute",
-                    left: `${(i / Math.max(1, ticks.length - 1)) * 100}%`,
-                    top: 0,
-                    width: 3,
-                    height: 8,
-                    background: "#ff6b4a",
-                  }}
+                  style={{ left: `${(i / Math.max(1, ticks.length - 1)) * 100}%` }}
                 />
               ))}
             </div>
             <div className="row" style={{ marginTop: 12, gap: 8 }}>
-              <button className="btn" onClick={() => setPlaying((p) => !p)}>
+              <button className="btn" onClick={() => setPlaying((p) => !p)} disabled={!ticks.length}>
                 {playing ? "Pause" : "Play"}
               </button>
               <span className="muted">
@@ -192,7 +206,9 @@ export default function ReplayPage() {
                   ? `${current.minute.toFixed(1)}' · ${current.home_goals}–${current.away_goals} · ${
                       current.is_teleport ? "TELEPORT" : current.phase
                     }`
-                  : "No ticks"}
+                  : loadingTicks
+                    ? "Loading…"
+                    : "No ticks"}
                 {teleports ? ` · ${teleports} flagged` : ""}
               </span>
             </div>
@@ -202,22 +218,26 @@ export default function ReplayPage() {
           <p className="kicker">Flagged matches</p>
           <h2>speed_hack</h2>
           <ul className="squad">
-            {flagged.map((m) => (
-              <li key={m.match_id}>
-                <button
-                  type="button"
-                  className="btn ghost"
-                  style={{ width: "100%", textAlign: "left" }}
-                  onClick={() => setMatchId(m.match_id)}
-                >
-                  <span style={{ fontSize: 12 }}>{m.match_id.slice(0, 18)}…</span>
-                  <b>
-                    {m.teleports} tp · {Number(m.max_speed || 0).toFixed(0)} u/s
-                  </b>
-                </button>
-              </li>
-            ))}
-            {!flagged.length && <li className="muted">No flagged matches yet — run make seed.</li>}
+            {loadingFlagged && <li className="muted">Reading flagged marts…</li>}
+            {!loadingFlagged &&
+              flagged.map((m) => (
+                <li key={m.match_id}>
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    style={{ width: "100%", textAlign: "left" }}
+                    onClick={() => setMatchId(m.match_id)}
+                  >
+                    <span style={{ fontSize: 12 }}>{m.match_id.slice(0, 18)}…</span>
+                    <b>
+                      {m.teleports} tp · {Number(m.max_speed || 0).toFixed(0)} u/s
+                    </b>
+                  </button>
+                </li>
+              ))}
+            {!loadingFlagged && !flagged.length && (
+              <li className="muted">No flagged matches yet — run make seed.</li>
+            )}
           </ul>
         </aside>
       </div>

@@ -93,11 +93,27 @@ export function MatchHUD({
 }: Props) {
   const clock = formatClock(minute);
   const phantom = displayHome !== home;
+  const [stamina, setStamina] = useState(1);
+  const [ctrlNum, setCtrlNum] = useState(HOME_NUMBERS[CONTROLLED_IDX]);
+
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const s = stateRef.current;
+      setStamina(s.stamina ?? 1);
+      setCtrlNum(HOME_NUMBERS[s.controlledIdx] ?? HOME_NUMBERS[CONTROLLED_IDX]);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [stateRef]);
+
+  const staminaPct = `${Math.round(Math.max(0, Math.min(1, stamina)) * 100)}%`;
 
   return (
     <div className="match-hud">
       <div className={`scorebug ${feedCorrected ? "feed-corrected" : ""}`}>
-        <div className="scorebug-badge">EA</div>
+        <div className="scorebug-badge" title="Snowpitch">SP</div>
         <div className="scorebug-teams">
           <span className="sb-abbr">RIM</span>
           <span className={`sb-score ${phantom ? "phantom-score" : ""}`}>
@@ -108,6 +124,9 @@ export function MatchHUD({
           <span className="sb-abbr away">{opponentName.slice(0, 3).toUpperCase() || "AWY"}</span>
         </div>
         <div className="scorebug-clock">{clock}</div>
+        <div className="scorebug-live" aria-hidden>
+          LIVE
+        </div>
       </div>
 
       <div className="match-hud-meta">
@@ -127,10 +146,10 @@ export function MatchHUD({
         <div className="crest home-crest" />
         <div className="team-panel-body">
           <div className="team-panel-name">{homePlayerName}</div>
-          <div className="stamina-bar">
-            <i style={{ width: "78%" }} />
+          <div className="stamina-bar" title={`Stamina ${staminaPct}`}>
+            <i style={{ width: staminaPct }} />
           </div>
-          <div className="squad-num">{HOME_NUMBERS[CONTROLLED_IDX]}</div>
+          <div className="squad-num">{ctrlNum}</div>
         </div>
       </div>
 
@@ -142,7 +161,7 @@ export function MatchHUD({
         <div className="team-panel-body right">
           <div className="team-panel-name">{opponentName || "Away"}</div>
           <div className="stamina-bar away">
-            <i style={{ width: "72%" }} />
+            <i style={{ width: "100%" }} />
           </div>
           <div className="squad-num">{AWAY_NUMBERS[9]}</div>
         </div>

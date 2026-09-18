@@ -280,7 +280,13 @@ export function GroundMist() {
 }
 
 /** GPU-waved instanced crowd billboards on all four stands. */
-export function Crowd({ count = 2000 }: { count?: number }) {
+export function Crowd({
+  count = 2000,
+  castShadow = false,
+}: {
+  count?: number;
+  castShadow?: boolean;
+}) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const color = useMemo(() => new THREE.Color(), []);
@@ -323,9 +329,10 @@ export function Crowd({ count = 2000 }: { count?: number }) {
           } else {
             dummy.position.set(sign * out, y, along);
           }
-          // Thicker billboards — fewer empty gaps at broadcast distance
-          const s = 1.15 + Math.random() * 0.35;
-          dummy.scale.set(s * 0.85, s, 1);
+          // Near-camera front rows thicker for density read
+          const nearBoost = row < 3 ? 1.25 : 1.05;
+          const s = (1.1 + Math.random() * 0.35) * nearBoost;
+          dummy.scale.set(s * 0.9, s, 1);
           dummy.lookAt(0, y, 0);
           dummy.updateMatrix();
           mesh.setMatrixAt(i, dummy.matrix);
@@ -401,7 +408,12 @@ export function Crowd({ count = 2000 }: { count?: number }) {
   });
 
   return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, count]} castShadow frustumCulled={false}>
+    <instancedMesh
+      ref={meshRef}
+      args={[undefined, undefined, count]}
+      castShadow={castShadow}
+      frustumCulled={false}
+    >
       <planeGeometry args={[0.55, 0.95]} />
       <meshStandardMaterial
         map={spectatorTex}

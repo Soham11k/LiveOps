@@ -5,7 +5,7 @@ import { useAnimations, useGLTF } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
-import { getNumberMap, kitHex, kitSkinHex, type KitRole } from "@/lib/kitTexture";
+import { getKitMap, getNumberMap, kitHex, kitSkinHex, type KitRole } from "@/lib/kitTexture";
 import { PITCH } from "@/lib/pitch";
 
 export type PlayerAnim = "idle" | "run" | "kick" | "pass";
@@ -61,6 +61,10 @@ export function JointedPlayer({
   const rightArm = useRef<THREE.Group>(null);
   const torso = useRef<THREE.Group>(null);
   const numMap = useMemo(() => (number != null ? getNumberMap(number) : null), [number]);
+  const kitMap = useMemo(
+    () => (number != null ? getKitMap(kitRole, number) : getKitMap(kitRole, 9)),
+    [kitRole, number]
+  );
   const skin = kitSkinHex(kitRole);
 
   useFrame((state) => {
@@ -87,14 +91,19 @@ export function JointedPlayer({
     }
   });
 
-  const bodyMat = (
+  // Jointed LOD can use flat kit canvas UVs (simple capsules) — GLB keeps tint-only
+  const kitMat = (
     <meshStandardMaterial
-      color={color}
+      color="#ffffff"
+      map={kitMap || undefined}
       roughness={0.48}
       metalness={0.05}
       emissive={color}
-      emissiveIntensity={0.18}
+      emissiveIntensity={0.14}
     />
+  );
+  const shortsMat = (
+    <meshStandardMaterial color="#1a1e24" roughness={0.7} metalness={0.02} emissive="#1a1e24" emissiveIntensity={0.06} />
   );
   const skinMat = <meshStandardMaterial color={skin} roughness={0.65} metalness={0.02} />;
 
@@ -103,7 +112,7 @@ export function JointedPlayer({
       <group ref={torso} position={[0, 0.95, 0]}>
         <mesh castShadow position={[0, 0.15, 0]}>
           <capsuleGeometry args={[0.22, 0.45, 6, 10]} />
-          {bodyMat}
+          {kitMat}
         </mesh>
         <mesh castShadow position={[0, 0.62, 0]}>
           <sphereGeometry args={[0.18, 14, 14]} />
@@ -112,37 +121,40 @@ export function JointedPlayer({
         {number != null && (
           <mesh position={[0, 0.2, -0.24]}>
             <planeGeometry args={[0.3, 0.34]} />
-            <meshBasicMaterial
+            <meshStandardMaterial
               map={numMap || undefined}
               color={numMap ? "#ffffff" : "#f8faf8"}
               transparent={!!numMap}
+              emissive="#f8faf8"
+              emissiveIntensity={0.35}
               toneMapped={false}
+              depthWrite={false}
             />
           </mesh>
         )}
         <group ref={leftArm} position={[-0.32, 0.25, 0]}>
           <mesh castShadow position={[0, -0.28, 0]}>
             <capsuleGeometry args={[0.07, 0.35, 4, 8]} />
-            {bodyMat}
+            {kitMat}
           </mesh>
         </group>
         <group ref={rightArm} position={[0.32, 0.25, 0]}>
           <mesh castShadow position={[0, -0.28, 0]}>
             <capsuleGeometry args={[0.07, 0.35, 4, 8]} />
-            {bodyMat}
+            {kitMat}
           </mesh>
         </group>
       </group>
       <group ref={leftLeg} position={[-0.12, 0.55, 0]}>
         <mesh castShadow position={[0, -0.32, 0]}>
           <capsuleGeometry args={[0.09, 0.4, 4, 8]} />
-          {bodyMat}
+          {shortsMat}
         </mesh>
       </group>
       <group ref={rightLeg} position={[0.12, 0.55, 0]}>
         <mesh castShadow position={[0, -0.32, 0]}>
           <capsuleGeometry args={[0.09, 0.4, 4, 8]} />
-          {bodyMat}
+          {shortsMat}
         </mesh>
       </group>
     </group>
@@ -288,16 +300,21 @@ function GlbPlayer({
     const numMap = getNumberMap(number);
     if (numMap) {
       const plate = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.32, 0.38),
-        new THREE.MeshBasicMaterial({
+        new THREE.PlaneGeometry(0.34, 0.4),
+        new THREE.MeshStandardMaterial({
           map: numMap,
           transparent: true,
           toneMapped: false,
           depthWrite: false,
+          emissive: new THREE.Color("#f8faf8"),
+          emissiveIntensity: 0.4,
+          roughness: 0.6,
+          metalness: 0,
         })
       );
-      plate.position.set(0, 1.25, -0.18);
+      plate.position.set(0, 1.28, -0.2);
       plate.rotation.y = Math.PI;
+      plate.renderOrder = 2;
       c.add(plate);
     }
     return c;

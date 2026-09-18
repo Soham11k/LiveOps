@@ -129,9 +129,21 @@ function Goal({ x }: { x: number }) {
   const depth = 2.2;
   const post = PITCH.postRadius * 2;
 
+  const netMat = (
+    <meshStandardMaterial
+      map={netTex || undefined}
+      color="#dce4ea"
+      transparent
+      opacity={0.5}
+      alphaTest={0.08}
+      side={THREE.DoubleSide}
+      depthWrite={false}
+      roughness={0.85}
+    />
+  );
+
   return (
     <group position={[x, 0, 0]}>
-      {/* Posts */}
       <mesh position={[0, gh / 2, -half]} castShadow>
         <boxGeometry args={[post, gh, post]} />
         <meshStandardMaterial color="#e8f0ec" metalness={0.55} roughness={0.25} />
@@ -140,58 +152,43 @@ function Goal({ x }: { x: number }) {
         <boxGeometry args={[post, gh, post]} />
         <meshStandardMaterial color="#e8f0ec" metalness={0.55} roughness={0.25} />
       </mesh>
-      {/* Crossbar */}
       <mesh position={[0, gh, 0]} castShadow>
         <boxGeometry args={[post, post, gw]} />
         <meshStandardMaterial color="#e8f0ec" metalness={0.55} roughness={0.25} />
       </mesh>
-      {/* Back net */}
-      <mesh position={[-side * depth, gh / 2, 0]}>
-        <planeGeometry args={[depth * 0.3 + 0.4, gh]} />
-        <meshStandardMaterial
-          map={netTex || undefined}
-          color="#dce4ea"
-          transparent
-          opacity={0.55}
-          alphaTest={0.1}
-          side={THREE.DoubleSide}
-          depthWrite={false}
-        />
+      {/* Double-plane back net with slight sag for depth */}
+      <mesh position={[-side * depth, gh / 2 - 0.08, 0]} rotation={[0.04 * side, 0, 0]}>
+        <planeGeometry args={[depth * 0.35 + 0.45, gh + 0.1]} />
+        {netMat}
       </mesh>
-      {/* Side nets */}
+      <mesh position={[-side * (depth - 0.12), gh / 2, 0]} rotation={[-0.03 * side, 0, 0]}>
+        <planeGeometry args={[depth * 0.28 + 0.35, gh]} />
+        {netMat}
+      </mesh>
       {([-1, 1] as const).map((s) => (
-        <mesh
-          key={s}
-          position={[-side * (depth / 2), gh / 2, s * half]}
-          rotation={[0, Math.PI / 2, 0]}
-        >
-          <planeGeometry args={[depth, gh]} />
-          <meshStandardMaterial
-            map={netTex || undefined}
-            color="#dce4ea"
-            transparent
-            opacity={0.45}
-            alphaTest={0.1}
-            side={THREE.DoubleSide}
-            depthWrite={false}
-          />
-        </mesh>
+        <group key={s}>
+          <mesh
+            position={[-side * (depth / 2), gh / 2, s * half]}
+            rotation={[0, Math.PI / 2, s * 0.04]}
+          >
+            <planeGeometry args={[depth, gh]} />
+            {netMat}
+          </mesh>
+          <mesh
+            position={[-side * (depth / 2 + 0.06), gh / 2 - 0.05, s * (half - 0.05)]}
+            rotation={[0, Math.PI / 2, -s * 0.03]}
+          >
+            <planeGeometry args={[depth * 0.92, gh * 0.95]} />
+            {netMat}
+          </mesh>
+        </group>
       ))}
-      {/* Top net */}
       <mesh
-        position={[-side * (depth / 2), gh, 0]}
-        rotation={[Math.PI / 2, 0, 0]}
+        position={[-side * (depth / 2), gh - 0.04, 0]}
+        rotation={[Math.PI / 2 + 0.06, 0, 0]}
       >
         <planeGeometry args={[depth, gw]} />
-        <meshStandardMaterial
-          map={netTex || undefined}
-          color="#dce4ea"
-          transparent
-          opacity={0.4}
-          alphaTest={0.1}
-          side={THREE.DoubleSide}
-          depthWrite={false}
-        />
+        {netMat}
       </mesh>
     </group>
   );
@@ -223,18 +220,23 @@ function StandTier({
 }) {
   const along = axis === "z" ? PITCH.length + 4 : PITCH.width + 2;
   const base = axis === "z" ? PITCH.halfZ + 1.8 : PITCH.halfX + 1.8;
-  // Slight per-row concrete variance so stands aren't flat grey boxes
+  const aisleCount = axis === "z" ? 5 : 3;
+  const segments = aisleCount + 1;
+  const aisleGap = 1.15;
+  const usable = along - aisleGap * aisleCount;
+  const segLen = usable / segments;
+
   const rowMats = useMemo(() => {
     return Array.from({ length: rows }).map((_, i) => {
       const t = i / Math.max(1, rows - 1);
-      const r = 0.18 + t * 0.06 + (i % 3) * 0.02;
-      const g = 0.22 + t * 0.05 + (i % 2) * 0.015;
-      const b = 0.26 + t * 0.04;
-      const hex = new THREE.Color(r, g, b).getStyle();
+      const r = 0.16 + t * 0.07 + (i % 3) * 0.018;
+      const g = 0.2 + t * 0.055 + (i % 2) * 0.012;
+      const b = 0.24 + t * 0.045;
       return {
-        color: hex,
-        roughness: 0.72 + (i % 4) * 0.05,
-        metalness: 0.04 + (i % 3) * 0.02,
+        color: new THREE.Color(r, g, b).getStyle(),
+        roughness: 0.7 + (i % 4) * 0.055,
+        metalness: 0.03 + (i % 3) * 0.02,
+        seat: new THREE.Color(0.12 + (i % 3) * 0.03, 0.16 + (i % 2) * 0.02, 0.2).getStyle(),
       };
     });
   }, [rows]);
@@ -244,23 +246,50 @@ function StandTier({
       {Array.from({ length: rows }).map((_, i) => {
         const rise = 0.4 + i * 0.58;
         const out = base + i * 0.72;
-        const pos: [number, number, number] =
-          axis === "z" ? [0, rise, sign * out] : [sign * out, rise, 0];
-        const geo: [number, number, number] =
-          axis === "z" ? [along, 0.5, 0.7] : [0.7, 0.5, along * 0.92];
         const mat = rowMats[i];
+        // Seat-row indent: structure slightly behind the seat lip
+        const structOut = out + 0.12 * sign;
         return (
-          <mesh key={i} position={pos} castShadow receiveShadow>
-            <boxGeometry args={geo} />
-            <meshStandardMaterial
-              color={mat.color}
-              roughness={mat.roughness}
-              metalness={mat.metalness}
-            />
-          </mesh>
+          <group key={i}>
+            {Array.from({ length: segments }).map((__, seg) => {
+              const alongCenter =
+                -along / 2 + seg * (segLen + aisleGap) + segLen / 2;
+              const pos: [number, number, number] =
+                axis === "z"
+                  ? [alongCenter, rise, sign * structOut]
+                  : [sign * structOut, rise, alongCenter];
+              const geo: [number, number, number] =
+                axis === "z" ? [segLen * 0.96, 0.48, 0.55] : [0.55, 0.48, segLen * 0.96];
+              const seatPos: [number, number, number] =
+                axis === "z"
+                  ? [alongCenter, rise + 0.18, sign * (out - 0.08)]
+                  : [sign * (out - 0.08), rise + 0.18, alongCenter];
+              const seatGeo: [number, number, number] =
+                axis === "z" ? [segLen * 0.9, 0.12, 0.42] : [0.42, 0.12, segLen * 0.9];
+              return (
+                <group key={seg}>
+                  <mesh position={pos} castShadow receiveShadow>
+                    <boxGeometry args={geo} />
+                    <meshStandardMaterial
+                      color={mat.color}
+                      roughness={mat.roughness}
+                      metalness={mat.metalness}
+                    />
+                  </mesh>
+                  <mesh position={seatPos} castShadow receiveShadow>
+                    <boxGeometry args={seatGeo} />
+                    <meshStandardMaterial
+                      color={mat.seat}
+                      roughness={0.88}
+                      metalness={0.02}
+                    />
+                  </mesh>
+                </group>
+              );
+            })}
+          </group>
         );
       })}
-      {/* Back wall */}
       <mesh
         position={
           axis === "z"
@@ -272,7 +301,7 @@ function StandTier({
         <boxGeometry
           args={axis === "z" ? [along + 2, 5.2, 0.9] : [0.9, 5.2, along * 0.95]}
         />
-        <meshStandardMaterial color="#243038" roughness={0.78} metalness={0.06} />
+        <meshStandardMaterial color="#1e282e" roughness={0.82} metalness={0.05} />
       </mesh>
     </group>
   );
@@ -317,6 +346,17 @@ function RoofCanopy({ axis, sign }: { axis: "z" | "x"; sign: 1 | -1 }) {
       <mesh position={canopyPos} castShadow>
         <boxGeometry args={canopyGeo} />
         <meshStandardMaterial color="#2a343c" metalness={0.15} roughness={0.75} />
+      </mesh>
+      {/* Darker roof underside so bowl reads as sheltered */}
+      <mesh position={[canopyPos[0], canopyPos[1] - 0.12, canopyPos[2]]}>
+        <boxGeometry
+          args={
+            axis === "z"
+              ? [canopyGeo[0] * 0.98, 0.08, canopyGeo[2] * 0.95]
+              : [canopyGeo[0] * 0.95, 0.08, canopyGeo[2] * 0.98]
+          }
+        />
+        <meshStandardMaterial color="#12181c" roughness={0.95} metalness={0.02} />
       </mesh>
     </group>
   );

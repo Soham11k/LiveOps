@@ -88,7 +88,7 @@ export function PipelineStrip() {
   return (
     <footer className="pipeline-strip">
       <div className="pipeline-main">
-        <span>
+        <span className="pipeline-primary">
           {pipe ? (
             <>
               <code>{pipe.backend}</code> · <code>{shortLoc(pipe.location)}</code>
@@ -102,7 +102,7 @@ export function PipelineStrip() {
           {pipe ? pipe.bronze_ticks.toLocaleString() : "—"}
           {lastFlush ? ` · flush ${lastFlush}` : ""}
         </span>
-        <span>
+        <span className="pipeline-dbt">
           dbt · {q ? `${q.passed}P/${q.warned}W/${q.failed}F` : "—"}
           {q?.elapsed_seconds != null ? ` · ${q.elapsed_seconds}s` : ""}
         </span>

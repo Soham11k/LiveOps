@@ -12,6 +12,7 @@ export function Nav() {
           snow<span>pitch</span>
         </Link>
         <span className="brand-meta">SP-1.12 · INTERNAL</span>
+        <span className="brand-meta brand-meta-mobile">SP-1.12</span>
       </div>
       <nav className="navlinks">
         <Link href="/" data-active={!path || path === "/" ? "true" : "false"}>

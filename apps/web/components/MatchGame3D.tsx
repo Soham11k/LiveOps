@@ -7,18 +7,7 @@ import {
   PerformanceMonitor,
   Trail,
 } from "@react-three/drei";
-import {
-  EffectComposer,
-  Bloom,
-  Vignette,
-  DepthOfField,
-  N8AO,
-  SMAA,
-  ToneMapping,
-  HueSaturation,
-  BrightnessContrast,
-} from "@react-three/postprocessing";
-import { BlendFunction, ToneMappingMode } from "postprocessing";
+import { DepthOfField } from "@react-three/postprocessing";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { api, type Opponent, type Profile } from "@/lib/api";
@@ -26,6 +15,7 @@ import { BallModel } from "@/components/Models";
 import { Stadium } from "@/components/Stadium";
 import { AnimatedPlayer, type PlayerAnim } from "@/components/Players";
 import { Crowd, Floodlights, GroundAtmosphere, SnowStorm } from "@/components/StadiumFX";
+import { MatchPost } from "@/components/MatchPost";
 import { MatchHUD } from "@/components/MatchHUD";
 import { getQuality, stepDown, stepUp, type QualitySettings, type QualityTier } from "@/lib/quality";
 import {
@@ -293,13 +283,15 @@ function MatchScene({
     const light = dirLight.current;
     if (!light) return;
     light.shadow.mapSize.set(quality.shadowMapSize, quality.shadowMapSize);
-    light.shadow.camera.left = -60;
-    light.shadow.camera.right = 60;
-    light.shadow.camera.top = 45;
-    light.shadow.camera.bottom = -45;
-    light.shadow.camera.near = 1;
-    light.shadow.camera.far = 160;
-    light.shadow.bias = -0.0004;
+    // Tighter frustum around the pitch — sharper player/ball shadows
+    light.shadow.camera.left = -42;
+    light.shadow.camera.right = 42;
+    light.shadow.camera.top = 32;
+    light.shadow.camera.bottom = -32;
+    light.shadow.camera.near = 2;
+    light.shadow.camera.far = 120;
+    light.shadow.bias = -0.00028;
+    light.shadow.normalBias = 0.02;
     light.shadow.camera.updateProjectionMatrix();
   }, [quality.shadowMapSize]);
 
@@ -789,7 +781,7 @@ function MatchScene({
         />
       )}
       <Stadium snowAmount={snow} />
-      <Crowd count={quality.crowdCount} />
+      <Crowd count={quality.crowdCount} castShadow={quality.tier === "high"} />
       <GroundAtmosphere />
 
       <Trail width={0.06} length={1.4} color="#c8d8e4" attenuation={(w) => w * w * 0.18}>
@@ -842,27 +834,13 @@ function MatchScene({
 
       <BroadcastCamera stateRef={stateRef} />
 
-      <EffectComposer enableNormalPass>
-        <N8AO
-          aoRadius={quality.aoRadius}
-          aoSamples={quality.aoSamples}
-          intensity={1.05}
-          distanceFalloff={1.15}
-        />
-        <Bloom intensity={0.32} luminanceThreshold={0.78} mipmapBlur />
-        <FocusDoF stateRef={stateRef} />
-        <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
-        <HueSaturation saturation={0.04} hue={-0.015} />
-        <BrightnessContrast brightness={-0.02} contrast={0.1} />
-        <Vignette
-          offset={0.3}
-          darkness={Math.min(vignette, 0.55)}
-          blendFunction={
-            stateRef.current.riggedPulse ? BlendFunction.COLOR_BURN : BlendFunction.NORMAL
-          }
-        />
-        <SMAA />
-      </EffectComposer>
+      <MatchPost
+        quality={quality}
+        vignette={vignette}
+        riggedPulse={!!stateRef.current.riggedPulse}
+      >
+        {quality.tier === "high" ? <FocusDoF stateRef={stateRef} /> : null}
+      </MatchPost>
     </>
   );
 }
@@ -1290,7 +1268,8 @@ export function MatchGame({ profile }: { profile: Profile }) {
                 cam.position.set(0, 20, 56);
                 cam.lookAt(0, 1, 0);
               }}
-              style={{ width: "100%", height: 560 }}
+              className="match-canvas"
+              style={{ width: "100%", height: "min(70vh, 720px)" }}
             >
               <PerformanceMonitor
                 onDecline={() => setQualityTier((t) => stepDown(t))}
@@ -1341,11 +1320,21 @@ export function MatchGame({ profile }: { profile: Profile }) {
               </div>
             )}
             {phase === "ready" && (
-              <div className="chance-banner">
-                <button className="btn" onClick={start}>
-                  Kick off
-                </button>
-                <p className="control-legend">{CTRL_HINT}</p>
+              <div className="kickoff-overlay">
+                <div className="kickoff-card">
+                  <p className="kicker">Arcade half · broadcast</p>
+                  <h2>Ready for kick off</h2>
+                  <ul className="control-glyphs">
+                    <li><kbd>WASD</kbd> move</li>
+                    <li><kbd>Shift</kbd> sprint</li>
+                    <li><kbd>Q</kbd> switch</li>
+                    <li><kbd>LMB</kbd> / <kbd>Space</kbd> shoot</li>
+                    <li><kbd>E</kbd> pass · <kbd>F</kbd> lob</li>
+                  </ul>
+                  <button className="btn" onClick={start}>
+                    Kick off
+                  </button>
+                </div>
               </div>
             )}
             {phase === "replay" && (
