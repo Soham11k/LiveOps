@@ -25,6 +25,11 @@ vars:
   wash_price_multiple: 6
   wash_max_seconds_listed: 120
   wash_trade_threshold: 20
+  # Tick physics: elite strike ~35 m/s; anything above this in one sample is cheating.
+  max_plausible_ball_speed: 45
+  # Metres of ball travel in a single 100 ms tick that cannot be physical.
+  teleport_displacement: 8
+  teleport_alert_threshold: 3
 
 models:
   snowpitch:

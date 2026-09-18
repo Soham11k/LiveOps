@@ -106,3 +106,15 @@ models:
           - accepted_range:
               arguments:
                 min_value: 1
+
+  - name: stg_match_ticks
+    description: >
+      10 Hz ball state with lag()-derived velocity, acceleration proxies, and
+      is_teleport flags. Separate bronze table so event models stay cheap.
+    columns:
+      - name: match_id
+        data_tests: [not_null]
+      - name: tick_ms
+        data_tests: [not_null]
+      - name: is_teleport
+        data_tests: [not_null]

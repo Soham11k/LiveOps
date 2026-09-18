@@ -47,3 +47,27 @@ sources:
               - not_null
           - name: payload
             description: Event-specific JSON body, unpacked in staging.
+
+      - name: match_ticks
+        identifier: "{{ 'MATCH_TICKS' if target.type == 'snowflake' else 'bronze_match_ticks' }}"
+        description: >
+          High-frequency (10 Hz) match state snapshots. Separate from raw_events
+          so event models never pay a VARIANT parse tax on a 100x volume stream.
+        loaded_at_field: ts
+        freshness:
+          warn_after: {count: 12, period: hour}
+          error_after: {count: 72, period: hour}
+        columns:
+          - name: match_id
+            data_tests: [not_null]
+          - name: tick_ms
+            data_tests: [not_null]
+          - name: ball_x
+            data_tests: [not_null]
+          - name: ball_z
+            data_tests: [not_null]
+          - name: possession
+            data_tests:
+              - accepted_values:
+                  arguments:
+                    values: ['home', 'away']

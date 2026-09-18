@@ -37,9 +37,8 @@ def run(
 ) -> subprocess.CompletedProcess:
     """Run a dbt command against the Snowpitch project.
 
-    Raises DbtError on failure. Note that dbt exits 0 when data tests only
-    *warn*, which is what the three integrity tests are configured to do, so a
-    detected game bug does not break the build.
+    Raises DbtError on failure. Detector regression tests on planted integrity
+    bugs are severity=error, so a silent miss fails the build.
     """
     env = {
         **os.environ,
@@ -123,4 +122,75 @@ def last_run_summary() -> dict:
         "generated_at": generated,
         "freshness": freshness,
         "read_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# Map gold mart aliases to dbt model names under models.snowpitch.marts.
+_MODEL_BY_ALIAS = {
+    "fct_match_fairness": "fct_match_fairness",
+    "fct_pack_odds": "fct_pack_odds",
+    "fct_market_health": "fct_market_health",
+    "fct_tick_integrity": "fct_tick_integrity",
+    "fct_integrity_alerts": "fct_integrity_alerts",
+}
+
+
+def alert_evidence(source_model: str) -> dict:
+    """Pull compiled SQL and upstream refs for a mart from dbt/target/manifest.json."""
+    import json
+
+    manifest_path = PROJECT_DIR / "target" / "manifest.json"
+    if not manifest_path.exists():
+        return {
+            "compiled_sql": None,
+            "upstream_refs": [],
+            "message": "No dbt manifest.json. Run `make dbt`.",
+        }
+
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {"compiled_sql": None, "upstream_refs": [], "message": "Corrupt manifest.json"}
+
+    nodes = data.get("nodes") or {}
+    model_name = _MODEL_BY_ALIAS.get(source_model, source_model)
+    node = None
+    for uid, n in nodes.items():
+        if not uid.startswith("model."):
+            continue
+        if n.get("name") == model_name or n.get("alias") == model_name.replace("fct_", ""):
+            node = n
+            break
+        # DuckDB aliases drop fct_ prefix sometimes
+        if n.get("name") == source_model:
+            node = n
+            break
+
+    if not node:
+        # Fallback: raw model file
+        raw = PROJECT_DIR / "models" / "marts" / f"{model_name}.sql"
+        sql = raw.read_text(encoding="utf-8") if raw.exists() else None
+        return {
+            "compiled_sql": sql,
+            "upstream_refs": [],
+            "message": "Manifest node missing; showing source SQL",
+        }
+
+    compiled = (
+        node.get("compiled_code")
+        or node.get("raw_code")
+        or node.get("compiled_sql")
+    )
+    refs = []
+    for dep in node.get("depends_on", {}).get("nodes", []):
+        if dep.startswith("model."):
+            refs.append(dep.split(".")[-1])
+        elif dep.startswith("source."):
+            refs.append(".".join(dep.split(".")[-2:]))
+
+    return {
+        "compiled_sql": compiled,
+        "upstream_refs": refs,
+        "unique_id": node.get("unique_id"),
+        "message": "ok",
     }

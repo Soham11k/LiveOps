@@ -14,13 +14,30 @@ _LOCK = threading.Lock()
 SQL_DIR = Path(__file__).resolve().parents[1] / "transform" / "snowflake"
 
 
+def _load_dotenv() -> None:
+    env_path = Path(__file__).resolve().parents[1] / ".env"
+    if not env_path.exists():
+        return
+    with open(env_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            os.environ[key] = value
+
+
 def snowflake_env_ready() -> bool:
+    _load_dotenv()
     return bool(os.getenv("SNOWFLAKE_ACCOUNT") and os.getenv("SNOWFLAKE_USER") and os.getenv("SNOWFLAKE_PASSWORD"))
 
 
 def connect_snowflake():
     import snowflake.connector
 
+    _load_dotenv()
     if not snowflake_env_ready():
         raise RuntimeError(
             "Snowflake credentials missing. Set SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PASSWORD."
@@ -303,16 +320,97 @@ class SnowflakeWarehouse:
         )
 
     def alerts(self) -> list[dict[str, Any]]:
-        return self._fetchall(
+        rows = self._fetchall(
             """
             SELECT ALERT_ID AS alert_id,
                    SEVERITY AS severity,
                    TITLE AS title,
                    DETAIL AS detail,
-                   METRIC AS metric
+                   METRIC AS metric,
+                   THRESHOLD AS threshold,
+                   SOURCE_MODEL AS source_model,
+                   DETECTED_AT AS detected_at
             FROM SNOWPITCH.GOLD.INTEGRITY_ALERTS
             """
         )
+        states = self.alert_states()
+        for row in rows:
+            st = states.get(str(row.get("alert_id")), {})
+            row["state"] = st.get("state") or "open"
+            row["state_actor"] = st.get("actor")
+            row["state_note"] = st.get("note")
+            row["state_updated_at"] = st.get("updated_at")
+        return rows
+
+    def alert_states(self) -> dict[str, dict[str, Any]]:
+        try:
+            rows = self._fetchall(
+                """
+                SELECT ALERT_ID AS alert_id, STATE AS state, ACTOR AS actor,
+                       NOTE AS note, UPDATED_AT AS updated_at
+                FROM SNOWPITCH.OPS.ALERT_STATE
+                """
+            )
+            return {str(r["alert_id"]): r for r in rows}
+        except Exception:
+            return {}
+
+    def set_alert_state(
+        self,
+        alert_id: str,
+        state: str,
+        *,
+        actor: str = "ops",
+        note: str = "",
+    ) -> dict[str, Any]:
+        allowed = {"open", "ack", "resolved"}
+        if state not in allowed:
+            raise ValueError(f"state must be one of {allowed}")
+        with _LOCK:
+            con = connect_snowflake()
+            cur = con.cursor()
+            cur.execute("CREATE SCHEMA IF NOT EXISTS SNOWPITCH.OPS")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS SNOWPITCH.OPS.ALERT_STATE (
+                    ALERT_ID STRING, STATE STRING, ACTOR STRING, NOTE STRING,
+                    UPDATED_AT TIMESTAMP_NTZ
+                )
+                """
+            )
+            cur.execute("DELETE FROM SNOWPITCH.OPS.ALERT_STATE WHERE ALERT_ID = %s", (alert_id,))
+            cur.execute(
+                """
+                INSERT INTO SNOWPITCH.OPS.ALERT_STATE (ALERT_ID, STATE, ACTOR, NOTE, UPDATED_AT)
+                VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP())
+                """,
+                (alert_id, state, actor, note),
+            )
+            con.close()
+        return {"alert_id": alert_id, "state": state, "actor": actor, "note": note}
+
+    def alert_evidence(self, alert_id: str) -> dict[str, Any]:
+        from warehouse.dbt_runner import alert_evidence as _evidence
+
+        alerts = {str(a.get("alert_id")): a for a in self.alerts()}
+        row = alerts.get(alert_id)
+        if not row:
+            return {"ok": False, "alert_id": alert_id, "message": "Alert not firing"}
+        source = str(row.get("source_model") or "")
+        ev = _evidence(source)
+        return {
+            "ok": True,
+            "alert_id": alert_id,
+            "severity": row.get("severity"),
+            "title": row.get("title"),
+            "detail": row.get("detail"),
+            "metric": row.get("metric"),
+            "threshold": row.get("threshold"),
+            "source_model": source,
+            "detected_at": row.get("detected_at"),
+            "state": row.get("state", "open"),
+            **ev,
+        }
 
     def daily(self) -> list[dict[str, Any]]:
         return self._fetchall(
@@ -339,6 +437,179 @@ class SnowflakeWarehouse:
             ORDER BY TEST_ID
             """
         )
+
+    def ingest_ticks(
+        self,
+        match_id: str,
+        ticks: list[dict[str, Any]],
+        *,
+        player_id: str = "",
+        patch: str = "1.12-whiteout",
+    ) -> int:
+        if not ticks:
+            return 0
+        with _LOCK:
+            con = connect_snowflake()
+            cur = con.cursor()
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS SNOWPITCH.BRONZE.MATCH_TICKS (
+                    MATCH_ID STRING, TICK_MS NUMBER, MINUTE FLOAT,
+                    BALL_X FLOAT, BALL_Y FLOAT, BALL_Z FLOAT,
+                    POSSESSION STRING, HOME_GOALS NUMBER, AWAY_GOALS NUMBER,
+                    PHASE STRING, MOMENTUM_ON BOOLEAN, CHROME_ASSIST BOOLEAN,
+                    WORLD_SCALE FLOAT, PATCH STRING, PLAYER_ID STRING, TS TIMESTAMP_NTZ
+                )
+                """
+            )
+            try:
+                cur.execute(
+                    "ALTER TABLE SNOWPITCH.BRONZE.MATCH_TICKS ADD COLUMN IF NOT EXISTS CHROME_ASSIST BOOLEAN DEFAULT FALSE"
+                )
+            except Exception:
+                pass
+            try:
+                cur.execute(
+                    "ALTER TABLE SNOWPITCH.BRONZE.MATCH_TICKS ADD COLUMN IF NOT EXISTS WORLD_SCALE FLOAT DEFAULT 1.0"
+                )
+            except Exception:
+                pass
+            rows = [
+                (
+                    match_id,
+                    int(t.get("tick_ms", 0)),
+                    float(t.get("minute", 0)),
+                    float(t.get("ball_x", 0)),
+                    float(t.get("ball_y", 0)),
+                    float(t.get("ball_z", 0)),
+                    str(t.get("possession", "home")),
+                    int(t.get("home_goals", 0)),
+                    int(t.get("away_goals", 0)),
+                    str(t.get("phase", "run")),
+                    bool(t.get("momentum_on", True)),
+                    bool(t.get("chrome_assist", False)),
+                    float(t.get("world_scale", 1.0)),
+                    patch,
+                    player_id,
+                )
+                for t in ticks
+            ]
+            cur.executemany(
+                """
+                INSERT INTO SNOWPITCH.BRONZE.MATCH_TICKS (
+                    MATCH_ID, TICK_MS, MINUTE, BALL_X, BALL_Y, BALL_Z,
+                    POSSESSION, HOME_GOALS, AWAY_GOALS, PHASE, MOMENTUM_ON,
+                    CHROME_ASSIST, WORLD_SCALE, PATCH, PLAYER_ID, TS
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP())
+                """,
+                rows,
+            )
+            con.close()
+        return len(rows)
+
+    def replay(self, match_id: str) -> dict[str, Any]:
+        source = "SNOWPITCH.SILVER.MATCH_TICKS"
+        try:
+            ticks = self._fetchall(
+                """
+                SELECT TICK_MS AS tick_ms, MINUTE AS minute,
+                       BALL_X AS ball_x, BALL_Y AS ball_y, BALL_Z AS ball_z,
+                       POSSESSION AS possession, HOME_GOALS AS home_goals,
+                       AWAY_GOALS AS away_goals, PHASE AS phase,
+                       IS_TELEPORT AS is_teleport, BALL_SPEED AS ball_speed,
+                       1.0 AS world_scale
+                FROM SNOWPITCH.SILVER.MATCH_TICKS
+                WHERE MATCH_ID = %s
+                ORDER BY TICK_MS
+                """,
+                (match_id,),
+            )
+        except Exception:
+            source = "SNOWPITCH.BRONZE.MATCH_TICKS"
+            ticks = self._fetchall(
+                """
+                SELECT TICK_MS AS tick_ms, MINUTE AS minute,
+                       BALL_X AS ball_x, BALL_Y AS ball_y, BALL_Z AS ball_z,
+                       POSSESSION AS possession, HOME_GOALS AS home_goals,
+                       AWAY_GOALS AS away_goals, PHASE AS phase,
+                       FALSE AS is_teleport, NULL AS ball_speed,
+                       COALESCE(WORLD_SCALE, 1.0) AS world_scale
+                FROM SNOWPITCH.BRONZE.MATCH_TICKS
+                WHERE MATCH_ID = %s
+                ORDER BY TICK_MS
+                """,
+                (match_id,),
+            )
+        legacy_scale = 105.0 / 42.0
+        max_extent = 0.0
+        for t in ticks:
+            max_extent = max(
+                max_extent,
+                abs(float(t.get("ball_x") or 0)),
+                abs(float(t.get("ball_z") or 0)),
+            )
+        is_legacy = max_extent > 0.5 and max_extent < 22
+        scaled: list[dict[str, Any]] = []
+        for t in ticks:
+            row = dict(t)
+            if is_legacy:
+                row["ball_x"] = float(row.get("ball_x") or 0) * legacy_scale
+                by = float(row.get("ball_y") or 0.11)
+                row["ball_y"] = 0.11 if by < 1.0 else by * legacy_scale
+                row["ball_z"] = float(row.get("ball_z") or 0) * legacy_scale
+                row["world_scale"] = legacy_scale
+                if row.get("ball_speed") is not None:
+                    row["ball_speed"] = float(row["ball_speed"]) * legacy_scale
+            else:
+                row["world_scale"] = float(row.get("world_scale") or 1.0)
+            scaled.append(row)
+        teleports = sum(1 for t in scaled if t.get("is_teleport"))
+        return {
+            "match_id": match_id,
+            "ticks": scaled,
+            "teleports": teleports,
+            "source": source,
+        }
+
+    def flagged_matches(self, limit: int = 20) -> list[dict[str, Any]]:
+        try:
+            return self._fetchall(
+                f"""
+                SELECT MATCH_ID AS match_id,
+                       TELEPORTS AS teleports,
+                       MAX_SPEED AS max_speed
+                FROM SNOWPITCH.GOLD.TICK_INTEGRITY
+                WHERE TELEPORTS > 0
+                ORDER BY TELEPORTS DESC, MAX_SPEED DESC
+                LIMIT {int(limit)}
+                """
+            )
+        except Exception:
+            return []
+
+    def pipeline(self) -> dict[str, Any]:
+        quality = self.quality()
+        bronze_ticks = 0
+        last_tick_at = None
+        try:
+            row = self._fetchone(
+                "SELECT COUNT(*) AS n, MAX(TS) AS last_ts FROM SNOWPITCH.BRONZE.MATCH_TICKS"
+            ) or {}
+            bronze_ticks = int(row.get("n") or 0)
+            last_tick_at = row.get("last_ts")
+            if hasattr(last_tick_at, "isoformat"):
+                last_tick_at = last_tick_at.isoformat()
+        except Exception:
+            pass
+        return {
+            "ok": self.ready(),
+            "backend": self.backend_name(),
+            "location": "SNOWPITCH.BRONZE",
+            "bronze_table": "SNOWPITCH.BRONZE.MATCH_TICKS",
+            "bronze_ticks": bronze_ticks,
+            "last_tick_at": last_tick_at,
+            "quality": quality,
+        }
 
     def quality(self) -> dict[str, Any]:
         from warehouse.dbt_runner import last_run_summary

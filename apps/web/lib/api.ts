@@ -29,6 +29,30 @@ export type Alert = {
   title: string;
   detail?: string;
   metric: number;
+  threshold?: number;
+  source_model?: string;
+  detected_at?: string;
+  state?: string;
+  state_actor?: string;
+  state_note?: string;
+  state_updated_at?: string;
+};
+
+export type AlertEvidence = {
+  ok: boolean;
+  alert_id: string;
+  message?: string;
+  severity?: string;
+  title?: string;
+  detail?: string;
+  metric?: number;
+  threshold?: number;
+  source_model?: string;
+  detected_at?: string;
+  state?: string;
+  compiled_sql?: string | null;
+  upstream_refs?: string[];
+  unique_id?: string;
 };
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -84,6 +108,13 @@ export const api = {
   packs: () => req<Record<string, number | string>[]>("/ops/packs"),
   market: () => req<Record<string, number | string>[]>("/ops/market"),
   alerts: () => req<Alert[]>("/ops/alerts"),
+  setAlertState: (alert_id: string, body: { state: string; actor?: string; note?: string }) =>
+    req<{ alert_id: string; state: string }>("/ops/alerts/" + encodeURIComponent(alert_id) + "/state", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  alertEvidence: (alert_id: string) =>
+    req<AlertEvidence>("/ops/alerts/" + encodeURIComponent(alert_id) + "/evidence"),
   daily: () => req<{ day: string; matches: number }[]>("/ops/daily"),
   spend: () => req<{ spend_tier: string; appearances: number; wins: number; win_rate: number }[]>("/ops/spend"),
   quality: () =>
@@ -112,4 +143,68 @@ export const api = {
         wilson_high: number;
       }[]
     >("/ops/integrity-tests"),
+  sendTicks: (
+    match_id: string,
+    ticks: {
+      tick_ms: number;
+      minute: number;
+      ball_x: number;
+      ball_y: number;
+      ball_z: number;
+      possession: "home" | "away";
+      home_goals: number;
+      away_goals: number;
+      phase: string;
+      momentum_on: boolean;
+      chrome_assist?: boolean;
+      world_scale?: number;
+    }[]
+  ) =>
+    req<{ ok: boolean; n: number }>("/play/ticks", {
+      method: "POST",
+      body: JSON.stringify({ match_id, ticks }),
+    }),
+  replay: (match_id: string) =>
+    req<{
+      match_id: string;
+      ticks: {
+        tick_ms: number;
+        minute: number;
+        ball_x: number;
+        ball_y: number;
+        ball_z: number;
+        possession: string;
+        home_goals: number;
+        away_goals: number;
+        phase: string;
+        is_teleport?: boolean;
+        world_scale?: number;
+        ball_speed?: number;
+      }[];
+      teleports: number;
+      source?: string;
+    }>(`/ops/replay/${encodeURIComponent(match_id)}`),
+  flaggedMatches: () =>
+    req<{ match_id: string; teleports: number; max_speed: number }[]>("/ops/flagged-matches"),
+  pipeline: () =>
+    req<{
+      ok: boolean;
+      backend: string;
+      location: string;
+      bronze_table: string;
+      bronze_ticks: number;
+      last_tick_at: string | null;
+      quality: {
+        ok: boolean;
+        message: string;
+        passed: number;
+        warned: number;
+        failed: number;
+        models: number;
+        elapsed_seconds: number | null;
+        generated_at?: string;
+      };
+    }>("/ops/pipeline"),
+  refreshMarts: () =>
+    req<{ ok: boolean; backend: string }>("/ops/refresh", { method: "POST" }),
 };

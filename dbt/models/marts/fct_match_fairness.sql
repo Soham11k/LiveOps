@@ -42,12 +42,18 @@ with late_chances as (
 
 sides as (
 
-    select home_id as player_id, home_spend_tier as spend_tier, winner_id
+    select
+        home_id as player_id,
+        home_spend_tier as spend_tier,
+        winner_id
     from {{ ref('stg_matches') }}
 
     union all
 
-    select away_id, away_spend_tier, winner_id
+    select
+        away_id,
+        away_spend_tier,
+        winner_id
     from {{ ref('stg_matches') }}
 
 ),
@@ -66,7 +72,7 @@ pay_to_win as (
 
     select
         max(case when spend_tier = 'whale' then win_rate end) as whale_win_rate,
-        max(case when spend_tier = 'f2p'   then win_rate end) as f2p_win_rate
+        max(case when spend_tier = 'f2p' then win_rate end) as f2p_win_rate
     from win_rate_by_tier
 
 )

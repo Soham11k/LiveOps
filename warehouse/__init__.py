@@ -20,7 +20,8 @@ def _load_dotenv() -> None:
             key, _, value = line.partition("=")
             key = key.strip()
             value = value.strip().strip('"').strip("'")
-            os.environ.setdefault(key, value)
+            # .env wins over stale shell exports (setdefault hid WAREHOUSE_BACKEND=snowflake).
+            os.environ[key] = value
 
 
 @lru_cache(maxsize=1)

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { MatchGame } from "@/components/MatchGame";
+import { BroadcastHeader } from "@/components/BroadcastHeader";
 import { api, type Profile } from "@/lib/api";
 
 const KEY = "snowpitch_player";
@@ -42,11 +43,19 @@ export default function PlayPage() {
       </main>
     );
   }
-  if (!profile) return <p className="muted">Signing you to FC Rime…</p>;
+  if (!profile) {
+    return (
+      <main>
+        <p className="muted">Signing you to FC Rime…</p>
+        <p className="lede" style={{ marginTop: 8 }}>
+          Snowflake profile lookup can take ~10–15s on first hit — hang tight.
+        </p>
+      </main>
+    );
+  }
   return (
-    <main>
-      <p className="kicker">Weekend League</p>
-      <h1>Whiteout night</h1>
+    <main className="match-page">
+      <BroadcastHeader kicker="SP-1 · MATCH" title="Arcade half" lineage="WASD · Shift sprint · Q switch · LMB shoot · E pass · F lob" />
       <MatchGame profile={profile} />
     </main>
   );

@@ -7,15 +7,21 @@ export function Nav() {
   const path = usePathname();
   return (
     <header className="topnav">
-      <Link href="/" className="brand">
-        Snow<span>pitch</span>
-      </Link>
-      <nav className="navlinks">
-        <Link href="/play" data-active={path === "/play"}>
-          Play
+      <div className="brand-wrap">
+        <Link href="/" className="brand">
+          snow<span>pitch</span>
         </Link>
-        <Link href="/ops" data-active={path === "/ops"}>
-          LiveOps
+        <span className="brand-meta">SP-1.12 · INTERNAL</span>
+      </div>
+      <nav className="navlinks">
+        <Link href="/" data-active={!path || path === "/" ? "true" : "false"}>
+          Ops
+        </Link>
+        <Link href="/play" data-active={path === "/play" ? "true" : "false"}>
+          Match
+        </Link>
+        <Link href="/ops/replay" data-active={path?.startsWith("/ops/replay") ? "true" : "false"}>
+          Replay
         </Link>
       </nav>
     </header>

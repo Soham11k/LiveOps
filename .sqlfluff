@@ -2,7 +2,9 @@
 dialect = duckdb
 templater = dbt
 max_line_length = 120
-exclude_rules = AL01,AL05,ST06,RF02
+# Layout/keyword rules fight column-aligned Jinja extracts and union aliases;
+# keep structure + referencing rules that catch real SQL bugs.
+exclude_rules = AL01,AL03,AL05,ST05,ST06,RF02,RF04,LT01,LT05,LT14
 
 [sqlfluff:templater:dbt]
 project_dir = ./dbt

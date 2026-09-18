@@ -29,8 +29,7 @@ jobs:
         run: .venv/bin/ruff check api warehouse simulator tests dags
 
       - name: SQLFluff (dbt models)
-        run: |
-          .venv/bin/sqlfluff lint dbt/models --dialect duckdb || true
+        run: .venv/bin/sqlfluff lint dbt/models --dialect duckdb
 
       - name: Seed DuckDB + dbt build
         env:
@@ -58,3 +57,35 @@ jobs:
         with:
           name: dbt-docs
           path: dbt/target
+
+  snowflake:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Python deps
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+      - name: Snowflake load + dbt (skipped without secrets)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          DBT_PROFILES_DIR: dbt
+          WAREHOUSE_BACKEND: snowflake
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+          SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+        run: |
+          if [ -z "$SNOWFLAKE_ACCOUNT" ]; then
+            echo "No SNOWFLAKE_ACCOUNT secret — skipping Snowflake job."
+            exit 0
+          fi
+          .venv/bin/python -m simulator.generate
+          .venv/bin/python -m warehouse.snowflake_load
+          .venv/bin/dbt build --project-dir dbt --target snowflake

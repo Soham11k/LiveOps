@@ -1,10 +1,19 @@
 VENV ?= $(HOME)/.venvs/snowpitch
-.PHONY: install seed seed-snowflake api web test dbt dbt-test dbt-docs lint benchmark
+.PHONY: install seed seed-snowflake api web test dbt dbt-test dbt-docs lint benchmark assets player-glb ball-glb
 
 install:
 	python3 -m venv $(VENV)
 	$(VENV)/bin/pip install -r requirements.txt
 	cd apps/web && npm install
+
+assets:
+	bash scripts/fetch-assets.sh
+
+ball-glb:
+	node scripts/generate_ball_glb.js
+
+player-glb:
+	/Applications/Blender.app/Contents/MacOS/Blender --background --python scripts/merge_mixamo_fbx.py
 
 seed:
 	PYTHONPATH=. $(VENV)/bin/python -m simulator.generate

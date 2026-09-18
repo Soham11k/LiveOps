@@ -52,6 +52,25 @@ class Warehouse(Protocol):
     def alerts(self) -> list[dict[str, Any]]:
         ...
 
+    def set_alert_state(
+        self,
+        alert_id: str,
+        state: str,
+        *,
+        actor: str = "ops",
+        note: str = "",
+    ) -> dict[str, Any]:
+        """Persist incident triage state (open / ack / resolved)."""
+        ...
+
+    def alert_states(self) -> dict[str, dict[str, Any]]:
+        """Map alert_id -> {state, actor, note, updated_at}."""
+        ...
+
+    def alert_evidence(self, alert_id: str) -> dict[str, Any]:
+        """Compiled SQL + lineage for an alert's source model from dbt manifest."""
+        ...
+
     def daily(self) -> list[dict[str, Any]]:
         ...
 
@@ -61,4 +80,20 @@ class Warehouse(Protocol):
 
     def integrity_tests(self) -> list[dict[str, Any]]:
         """Two-proportion z-tests with Wilson CIs from gold.integrity_tests."""
+        ...
+
+    def ingest_ticks(self, match_id: str, ticks: list[dict[str, Any]], *, player_id: str = "", patch: str = "1.12-whiteout") -> int:
+        """Batch-insert high-frequency match ticks into bronze.match_ticks."""
+        ...
+
+    def replay(self, match_id: str) -> dict[str, Any]:
+        """Ordered tick stream for a match, with teleport flags when available."""
+        ...
+
+    def flagged_matches(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Matches with suspected speed-hack / teleport ticks."""
+        ...
+
+    def pipeline(self) -> dict[str, Any]:
+        """LiveOps strip: backend location, bronze tick counts, dbt quality."""
         ...

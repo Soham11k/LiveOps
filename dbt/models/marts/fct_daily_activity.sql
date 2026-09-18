@@ -12,10 +12,10 @@
 -- dropped telemetry rather than dropped players.
 
 select
-    cast(ts as date)            as day,
-    count(distinct match_id)    as matches,
-    count(*)                    as match_rows,
-    max(ts)                     as max_event_ts
+    cast(ts as date) as day,
+    count(distinct match_id) as matches,
+    count(*) as match_rows,
+    max(ts) as max_event_ts
 
 from {{ ref('stg_matches') }}
 {% if is_incremental() %}

@@ -24,6 +24,8 @@ SCALE_PROFILES = {
         "honest_trades_per_day": 90,
         "wash_trades_per_day": 28,
         "format": "jsonl",
+        # Fraction of matches that emit 10 Hz tick streams (demo keeps CI fast).
+        "tick_sample_rate": 0.10,
     },
     "large": {
         "n_players": 2400,
@@ -32,8 +34,11 @@ SCALE_PROFILES = {
         "honest_trades_per_day": 400,
         "wash_trades_per_day": 80,
         "format": "parquet",
+        "tick_sample_rate": 0.01,
     },
 }
+
+TICKS_PATH = "data/match_ticks.jsonl"
 
 
 def resolve_scale(name: str = "demo") -> dict:

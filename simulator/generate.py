@@ -14,6 +14,7 @@ from simulator.config import (
     EVENTS_PATH,
     POST_PATCH_RARE_RATE,
     SEED,
+    TICKS_PATH,
     resolve_scale,
 )
 
@@ -44,6 +45,76 @@ def event(event_type: str, ts: datetime, player_id: str, payload: dict) -> dict:
         "player_id": player_id,
         "payload": payload,
     }
+
+
+def generate_match_ticks(
+    rng: random.Random,
+    *,
+    match_id: str,
+    player_id: str,
+    patch: str,
+    kickoff: datetime,
+    home_goals: int,
+    away_goals: int,
+    hacked: bool,
+) -> list[dict]:
+    """10 Hz ball path for one match. Hacked accounts get 15-25 unit teleports."""
+    ticks: list[dict] = []
+    # ~45 seconds of real time at 10 Hz ≈ 450 samples; keep demo lean at ~180.
+    n = 180
+    bx, by, bz = 0.0, 0.35, 0.0
+    home = 0
+    away = 0
+    goal_ticks = set()
+    if home_goals + away_goals > 0:
+        for _ in range(home_goals + away_goals):
+            goal_ticks.add(rng.randint(40, n - 20))
+    teleport_at = set()
+    if hacked:
+        for _ in range(rng.randint(2, 5)):
+            teleport_at.add(rng.randint(30, n - 10))
+
+    for i in range(n):
+        tick_ms = i * 100
+        minute = (i / n) * 90.0
+        # Smooth advance with noise
+        bx += rng.uniform(-0.35, 0.55)
+        bz += rng.uniform(-0.25, 0.25)
+        bx = max(-18.0, min(18.0, bx))
+        bz = max(-12.0, min(12.0, bz))
+        if i in teleport_at:
+            jump = rng.uniform(15.0, 25.0) * rng.choice([-1.0, 1.0])
+            bx = max(-20.0, min(20.0, bx + jump))
+            bz = max(-13.0, min(13.0, bz + rng.uniform(-3.0, 3.0)))
+        if i in goal_ticks:
+            if home < home_goals:
+                home += 1
+                bx = 16.0
+            elif away < away_goals:
+                away += 1
+                bx = -16.0
+        phase = "run"
+        if i in goal_ticks or i - 1 in goal_ticks:
+            phase = "chance"
+        ticks.append(
+            {
+                "match_id": match_id,
+                "tick_ms": tick_ms,
+                "minute": round(minute, 2),
+                "ball_x": round(bx, 3),
+                "ball_y": round(by, 3),
+                "ball_z": round(bz, 3),
+                "possession": "home" if bx >= 0 else "away",
+                "home_goals": home,
+                "away_goals": away,
+                "phase": phase,
+                "momentum_on": True,
+                "patch": patch,
+                "player_id": player_id,
+                "ts": iso(kickoff + timedelta(milliseconds=tick_ms)),
+            }
+        )
+    return ticks
 
 
 def build_players(rng: random.Random, n_players: int) -> list[dict]:
@@ -163,10 +234,15 @@ def generate_season(scale: str = "demo", path: Path | None = None) -> tuple[Path
     total = 0
     chunk_idx = 0
     buffer: list[dict] = []
+    tick_buffer: list[dict] = []
+    tick_sample_rate = float(profile.get("tick_sample_rate", 0.1))
+    # Small cohort of speed-hack accounts (planted bug #4).
+    hackers = {p["player_id"] for p in players[COIN_RING_SIZE : COIN_RING_SIZE + 12]}
     chunk_size = 50_000
 
     parquet_dir = Path(EVENTS_PARQUET_DIR)
     jsonl_path = Path(path or EVENTS_PATH)
+    ticks_path = Path(TICKS_PATH)
 
     if fmt == "parquet":
         if parquet_dir.exists():
@@ -296,6 +372,24 @@ def generate_season(scale: str = "demo", path: Path | None = None) -> tuple[Path
                 )
             )
 
+            if rng.random() < tick_sample_rate:
+                hacked = home["player_id"] in hackers or away["player_id"] in hackers
+                # Only plant teleports after the patch so the z-test has a baseline.
+                if patch != "1.12-whiteout":
+                    hacked = False
+                tick_buffer.extend(
+                    generate_match_ticks(
+                        rng,
+                        match_id=match_id,
+                        player_id=home["player_id"],
+                        patch=patch,
+                        kickoff=kickoff,
+                        home_goals=result["home_goals"],
+                        away_goals=result["away_goals"],
+                        hacked=hacked,
+                    )
+                )
+
             opener = home if rng.random() < 0.55 else away
             if rng.random() < 0.42:
                 rare_rate = (
@@ -380,14 +474,24 @@ def generate_season(scale: str = "demo", path: Path | None = None) -> tuple[Path
             "season_start": iso(season_start),
             "season_end": iso(season_end),
             "patch_ts": iso(patch_ts),
+            "ticks": len(tick_buffer),
         }
         (parquet_dir / "manifest.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        ticks_path.parent.mkdir(parents=True, exist_ok=True)
+        with ticks_path.open("w", encoding="utf-8") as f:
+            for row in tick_buffer:
+                f.write(json.dumps(row) + "\n")
         return parquet_dir, total
 
     buffer.sort(key=lambda r: r["ts"])
     with jsonl_path.open("w", encoding="utf-8") as f:
         for row in buffer:
             f.write(json.dumps(row) + "\n")
+    ticks_path.parent.mkdir(parents=True, exist_ok=True)
+    with ticks_path.open("w", encoding="utf-8") as f:
+        for row in tick_buffer:
+            f.write(json.dumps(row) + "\n")
+    print(f"Wrote {len(tick_buffer):,} ticks -> {ticks_path}")
     return jsonl_path, total
 
 

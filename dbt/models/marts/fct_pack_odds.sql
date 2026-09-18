@@ -16,15 +16,15 @@
 
 select
     patch,
-    count(*)                                        as packs,
-    {{ share_if('observed_rare') }}                 as observed_rare_rate,
-    avg(advertised_rare_rate)                       as advertised_rare_rate,
+    count(*) as packs,
+    {{ share_if('observed_rare') }} as observed_rare_rate,
+    avg(advertised_rare_rate) as advertised_rare_rate,
     {{ share_if('observed_rare') }} - avg(advertised_rare_rate) as drift,
     power(
         {{ count_if('observed_rare') }} - count(*) * {{ var('advertised_rare_rate') }},
         2
     ) / nullif(count(*) * {{ var('advertised_rare_rate') }}, 0) as chi_square_stat,
-    max(ts)                                         as max_event_ts
+    max(ts) as max_event_ts
 
 from {{ ref('stg_packs') }}
 {% if is_incremental() %}

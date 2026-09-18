@@ -17,12 +17,12 @@
 
 select
     patch,
-    count(*)                                            as trades,
-    median(price)                                       as median_price,
-    avg(price)                                          as avg_price,
-    {{ count_if(is_wash_trade()) }}                     as suspected_wash,
+    count(*) as trades,
+    median(price) as median_price,
+    avg(price) as avg_price,
+    {{ count_if(is_wash_trade()) }} as suspected_wash,
     {{ count_distinct_if(is_wash_trade(), 'seller_id') }} as wash_accounts,
-    max(ts)                                             as max_event_ts
+    max(ts) as max_event_ts
 
 from {{ ref('stg_trades') }}
 {% if is_incremental() %}

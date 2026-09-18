@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import random
 from datetime import datetime, timezone
-
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -70,6 +69,28 @@ class ConfigIn(BaseModel):
     pack_nerf: Optional[bool] = None
 
 
+class TickIn(BaseModel):
+    tick_ms: int
+    minute: float
+    ball_x: float
+    ball_y: float
+    ball_z: float
+    possession: str
+    home_goals: int
+    away_goals: int
+    phase: str
+    momentum_on: bool = True
+    chrome_assist: bool = False
+    world_scale: float = 1.0
+
+
+class TicksBatchIn(BaseModel):
+    match_id: str
+    player_id: Optional[str] = None
+    patch: Optional[str] = "1.12-whiteout"
+    ticks: List[TickIn] = Field(default_factory=list)
+
+
 def now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -81,6 +102,11 @@ def health() -> dict:
         "ok": warehouse.ready(),
         "backend": warehouse.backend_name(),
     }
+
+
+@app.get("/ops/pipeline")
+def pipeline() -> dict:
+    return wh().pipeline()
 
 
 @app.post("/me/bootstrap")
@@ -121,7 +147,7 @@ def bootstrap(body: BootstrapIn) -> dict:
                     "display_name": name,
                     "nation": RNG.choice(NATIONS),
                     "ovr": ovr,
-                    "spend_tier": "human",
+                    "spend_tier": "f2p",
                     "lifetime_spend": 0,
                     "bot": False,
                     "squad": squad,
@@ -184,7 +210,7 @@ def play_match(body: MatchIn) -> dict:
                 "away_id": opp,
                 "home_ovr": 80,
                 "away_ovr": body.opponent_ovr,
-                "home_spend_tier": "human",
+                "home_spend_tier": "f2p",
                 "away_spend_tier": "f2p",
                 "patch": patch,
                 "mode": "weekend_league",
@@ -247,7 +273,7 @@ def play_match(body: MatchIn) -> dict:
                 "away_id": opp,
                 "home_goals": body.home_goals,
                 "away_goals": body.away_goals,
-                "home_spend_tier": "human",
+                "home_spend_tier": "f2p",
                 "away_spend_tier": "f2p",
                 "home_ovr": 80,
                 "away_ovr": body.opponent_ovr,
@@ -381,6 +407,30 @@ def alerts() -> list[dict]:
     return wh().alerts()
 
 
+class AlertStateIn(BaseModel):
+    state: str
+    actor: Optional[str] = "ops"
+    note: Optional[str] = ""
+
+
+@app.post("/ops/alerts/{alert_id}/state")
+def set_alert_state(alert_id: str, body: AlertStateIn) -> dict:
+    try:
+        return wh().set_alert_state(
+            alert_id,
+            body.state,
+            actor=body.actor or "ops",
+            note=body.note or "",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/ops/alerts/{alert_id}/evidence")
+def alert_evidence(alert_id: str) -> dict:
+    return wh().alert_evidence(alert_id)
+
+
 @app.get("/ops/daily")
 def daily() -> list[dict]:
     return wh().daily()
@@ -399,6 +449,31 @@ def quality() -> dict:
 @app.get("/ops/integrity-tests")
 def integrity_tests() -> list[dict]:
     return wh().integrity_tests()
+
+
+@app.post("/play/ticks")
+def ingest_ticks(body: TicksBatchIn) -> dict:
+    """Fire-and-forget batch of 10 Hz match ticks from the live client."""
+    if not body.match_id or not body.ticks:
+        return {"ok": True, "n": 0}
+    rows = [t.model_dump() if hasattr(t, "model_dump") else t.dict() for t in body.ticks]
+    n = wh().ingest_ticks(
+        body.match_id,
+        rows,
+        player_id=body.player_id or "",
+        patch=body.patch or "1.12-whiteout",
+    )
+    return {"ok": True, "n": n}
+
+
+@app.get("/ops/replay/{match_id}")
+def replay(match_id: str) -> dict:
+    return wh().replay(match_id)
+
+
+@app.get("/ops/flagged-matches")
+def flagged_matches(limit: int = 20) -> list[dict]:
+    return wh().flagged_matches(limit=limit)
 
 
 @app.post("/ops/refresh")

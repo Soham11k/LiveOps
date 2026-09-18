@@ -83,22 +83,45 @@ models:
     description: >
       Firing alerts, one row per detected integrity problem. This is what the
       live-ops dashboard reads and what a on-call engineer would triage.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: alert_id
+        data_type: string
         data_tests:
           - not_null
           - unique
           - accepted_values:
               arguments:
-                values: ['momentum', 'pack_odds', 'coin_ring']
+                values: ['momentum', 'pack_odds', 'coin_ring', 'speed_hack']
       - name: severity
+        data_type: string
         data_tests:
           - not_null
           - accepted_values:
               arguments:
                 values: ['low', 'medium', 'high', 'critical']
+      - name: title
+        data_type: string
+        data_tests: [not_null]
       - name: detail
+        data_type: string
         description: Plain-language explanation shown in the dashboard.
+        data_tests: [not_null]
+      - name: metric
+        data_type: double
+        data_tests: [not_null]
+      - name: threshold
+        data_type: double
+        description: dbt var threshold that fired this alert.
+        data_tests: [not_null]
+      - name: source_model
+        data_type: string
+        description: Upstream gold mart that produced the metric.
+        data_tests: [not_null]
+      - name: detected_at
+        data_type: timestamp
         data_tests: [not_null]
 
   - name: fct_integrity_tests
@@ -112,7 +135,7 @@ models:
           - unique
           - accepted_values:
               arguments:
-                values: ['momentum', 'pack_odds', 'coin_ring']
+                values: ['momentum', 'pack_odds', 'coin_ring', 'speed_hack']
       - name: z_stat
         description: Two-proportion z statistic (patched minus baseline).
       - name: p_value
@@ -121,3 +144,31 @@ models:
         description: Lower Wilson 95% bound on the patched rate.
       - name: wilson_high
         description: Upper Wilson 95% bound on the patched rate.
+
+  - name: fct_ball_physics
+    description: >
+      Per-match ball kinematics from 10 Hz ticks — mean/p95/max speed, teleport
+      count, possession share. Completeness canary for the client sampler.
+    columns:
+      - name: match_id
+        data_tests: [not_null]
+      - name: tick_count
+        data_tests: [not_null]
+
+  - name: fct_tick_integrity
+    description: >
+      Matches with impossible ball speeds or single-tick teleports (planted
+      speed_hack bug). Feeds the speed_hack alert and /ops/replay.
+    columns:
+      - name: match_id
+        data_tests: [not_null, unique]
+      - name: teleports
+        data_tests: [not_null]
+
+  - name: fct_ball_heatmap
+    description: Ball position density on a 12x8 pitch grid, per patch.
+    columns:
+      - name: patch
+        data_tests: [not_null]
+      - name: ticks
+        data_tests: [not_null]

@@ -1,68 +1,125 @@
 "use client";
 
-import React, { useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { ContactShadows, SoftShadows } from "@react-three/drei";
+import { ContactShadows } from "@react-three/drei";
 import * as THREE from "three";
+import { PITCH } from "@/lib/pitch";
 
-/** Procedural mown-stripe pitch that accumulates snow as the match progresses. */
-export function StripedPitch({ snowAmount }: { snowAmount: number }) {
-  const mat = useMemo(() => {
-    const material = new THREE.ShaderMaterial({
-      uniforms: {
-        uSnow: { value: 0 },
-        uTime: { value: 0 },
-      },
-      vertexShader: `
-        varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: `
-        uniform float uSnow;
-        varying vec2 vUv;
-        void main() {
-          float stripe = step(0.5, fract(vUv.x * 18.0));
-          vec3 grassA = vec3(0.08, 0.28, 0.18);
-          vec3 grassB = vec3(0.10, 0.32, 0.20);
-          vec3 grass = mix(grassA, grassB, stripe);
-          vec3 snow = vec3(0.86, 0.90, 0.93);
-          vec3 color = mix(grass, snow, clamp(uSnow, 0.0, 0.85));
-          gl_FragColor = vec4(color, 1.0);
-        }
-      `,
-    });
-    return material;
-  }, []);
+function createSoftParticleTexture(): THREE.CanvasTexture {
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+  g.addColorStop(0, "rgba(255,255,255,1)");
+  g.addColorStop(0.4, "rgba(230,240,250,0.55)");
+  g.addColorStop(1, "rgba(200,220,240,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(canvas);
+}
 
-  useFrame((state) => {
-    mat.uniforms.uSnow.value = snowAmount;
-    mat.uniforms.uTime.value = state.clock.elapsedTime;
-  });
+function createSpectatorTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 32;
+  canvas.height = 48;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#2a3038";
+  ctx.fillRect(8, 18, 16, 28);
+  ctx.beginPath();
+  ctx.arc(16, 12, 7, 0, Math.PI * 2);
+  ctx.fillStyle = "#c8b090";
+  ctx.fill();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
 
+export function Floodlights({ withShafts = true }: { withShafts?: boolean }) {
+  const corners: [number, number, number][] = [
+    [-PITCH.halfX - 4, 18, -PITCH.halfZ - 4],
+    [PITCH.halfX + 4, 18, -PITCH.halfZ - 4],
+    [-PITCH.halfX - 4, 18, PITCH.halfZ + 4],
+    [PITCH.halfX + 4, 18, PITCH.halfZ + 4],
+  ];
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]} receiveShadow>
-      <planeGeometry args={[42, 28]} />
-      <primitive object={mat} attach="material" />
-    </mesh>
+    <group>
+      {corners.map((pos, i) => (
+        <group key={i} position={pos}>
+          <mesh castShadow>
+            <cylinderGeometry args={[0.35, 0.45, 16, 8]} />
+            <meshStandardMaterial color="#2a3034" metalness={0.65} roughness={0.35} />
+          </mesh>
+          <mesh position={[0, 8.5, 0]}>
+            <boxGeometry args={[2.4, 0.55, 1.2]} />
+            <meshStandardMaterial
+              color="#c9d6de"
+              emissive="#a8c0d0"
+              emissiveIntensity={2.8}
+              metalness={0.4}
+              roughness={0.3}
+            />
+          </mesh>
+          <mesh position={[0, 8.7, 0]}>
+            <sphereGeometry args={[0.7, 12, 12]} />
+            <meshBasicMaterial color="#e8f4ff" transparent opacity={0.4} depthWrite={false} />
+          </mesh>
+          <spotLight
+            position={[0, 8.7, 0]}
+            angle={0.65}
+            penumbra={0.5}
+            intensity={180}
+            distance={140}
+            castShadow
+            color="#f0f4f8"
+            shadow-bias={-0.0004}
+            shadow-mapSize-width={1024}
+            shadow-mapSize-height={1024}
+            target-position={[0, 0, 0]}
+          />
+          {withShafts && (
+            <mesh position={[0, 3, 0]} rotation={[Math.PI, 0, 0]}>
+              <coneGeometry args={[10, 16, 24, 1, true]} />
+              <meshBasicMaterial
+                color="#c8daf0"
+                transparent
+                opacity={0.045}
+                depthWrite={false}
+                side={THREE.DoubleSide}
+                blending={THREE.AdditiveBlending}
+              />
+            </mesh>
+          )}
+        </group>
+      ))}
+    </group>
   );
 }
 
-export function SnowStorm({ count = 4000 }: { count?: number }) {
+function SnowLayer({
+  count,
+  speedScale,
+  size,
+}: {
+  count: number;
+  speedScale: number;
+  size: number;
+}) {
   const ref = useRef<THREE.Points>(null);
+  const tex = useMemo(() => createSoftParticleTexture(), []);
   const { positions, speeds } = useMemo(() => {
     const positions = new Float32Array(count * 3);
     const speeds = new Float32Array(count);
     for (let i = 0; i < count; i++) {
-      positions[i * 3] = (Math.random() - 0.5) * 60;
-      positions[i * 3 + 1] = Math.random() * 28;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 40;
-      speeds[i] = 0.8 + Math.random() * 1.8;
+      positions[i * 3] = (Math.random() - 0.5) * 140;
+      positions[i * 3 + 1] = Math.random() * 40;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 100;
+      speeds[i] = (0.6 + Math.random() * 1.6) * speedScale;
     }
     return { positions, speeds };
-  }, [count]);
+  }, [count, speedScale]);
 
   useFrame((_, delta) => {
     const pts = ref.current;
@@ -70,11 +127,11 @@ export function SnowStorm({ count = 4000 }: { count?: number }) {
     const arr = pts.geometry.attributes.position.array as Float32Array;
     for (let i = 0; i < count; i++) {
       arr[i * 3 + 1] -= speeds[i] * delta;
-      arr[i * 3] += Math.sin(i + arr[i * 3 + 1]) * 0.01;
+      arr[i * 3] += Math.sin(i * 0.1 + arr[i * 3 + 1]) * 0.012 * speedScale;
       if (arr[i * 3 + 1] < 0) {
-        arr[i * 3 + 1] = 22 + Math.random() * 6;
-        arr[i * 3] = (Math.random() - 0.5) * 60;
-        arr[i * 3 + 2] = (Math.random() - 0.5) * 40;
+        arr[i * 3 + 1] = 28 + Math.random() * 10;
+        arr[i * 3] = (Math.random() - 0.5) * 140;
+        arr[i * 3 + 2] = (Math.random() - 0.5) * 100;
       }
     }
     pts.geometry.attributes.position.needsUpdate = true;
@@ -86,112 +143,181 @@ export function SnowStorm({ count = 4000 }: { count?: number }) {
         <bufferAttribute attach="attributes-position" args={[positions, 3]} />
       </bufferGeometry>
       <pointsMaterial
+        map={tex}
         color="#e8f0f4"
-        size={0.08}
+        size={size}
         sizeAttenuation
         transparent
-        opacity={0.85}
+        opacity={0.7}
         depthWrite={false}
+        blending={THREE.AdditiveBlending}
       />
     </points>
   );
 }
 
-export function Floodlights() {
-  const corners: [number, number, number][] = [
-    [-20, 14, -15],
-    [20, 14, -15],
-    [-20, 14, 15],
-    [20, 14, 15],
-  ];
+export function SnowStorm({
+  near = 2200,
+  far = 1800,
+}: {
+  near?: number;
+  far?: number;
+}) {
   return (
     <group>
-      {corners.map((pos, i) => (
-        <group key={i} position={pos}>
-          <mesh castShadow>
-            <cylinderGeometry args={[0.25, 0.35, 12, 8]} />
-            <meshStandardMaterial color="#2a3034" metalness={0.6} roughness={0.4} />
-          </mesh>
-          <mesh position={[0, 6.2, 0]}>
-            <boxGeometry args={[1.6, 0.4, 0.8]} />
-            <meshStandardMaterial color="#c9d6de" emissive="#a8c0d0" emissiveIntensity={1.2} />
-          </mesh>
-          <spotLight
-            position={[0, 6.4, 0]}
-            angle={0.55}
-            penumbra={0.45}
-            intensity={80}
-            distance={60}
-            castShadow
-            color="#dce8f0"
-          />
-        </group>
-      ))}
+      <SnowLayer count={near} speedScale={1.35} size={0.14} />
+      <SnowLayer count={far} speedScale={0.55} size={0.22} />
     </group>
   );
 }
 
-export function Crowd({ count = 3000 }: { count?: number }) {
+export function GroundMist() {
+  const tex = useMemo(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext("2d")!;
+    for (let y = 0; y < 256; y++) {
+      for (let x = 0; x < 256; x++) {
+        const n = (Math.sin(x * 0.08) + Math.cos(y * 0.07) + Math.sin((x + y) * 0.04)) * 0.25 + 0.5;
+        const v = Math.floor(n * 255);
+        ctx.fillStyle = `rgba(${v},${v},${v},1)`;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+    const t = new THREE.CanvasTexture(canvas);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(6, 4);
+    return t;
+  }, []);
+
+  useFrame((_, delta) => {
+    if (tex) {
+      tex.offset.x += delta * 0.015;
+      tex.offset.y += delta * 0.008;
+    }
+  });
+
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.08, 0]}>
+      <planeGeometry args={[PITCH.length + 20, PITCH.width + 16]} />
+      <meshBasicMaterial
+        map={tex}
+        color="#b8c8d4"
+        transparent
+        opacity={0.06}
+        depthWrite={false}
+        blending={THREE.AdditiveBlending}
+      />
+    </mesh>
+  );
+}
+
+/** GPU-waved instanced crowd billboards on all four stands. */
+export function Crowd({ count = 2000 }: { count?: number }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const color = useMemo(() => new THREE.Color(), []);
-  const phases = useMemo(() => Float32Array.from({ length: count }, () => Math.random() * Math.PI * 2), [count]);
+  const spectatorTex = useMemo(() => createSpectatorTexture(), []);
+  const phases = useMemo(() => {
+    const a = new Float32Array(count);
+    for (let i = 0; i < count; i++) a[i] = Math.random() * Math.PI * 2;
+    return a;
+  }, [count]);
 
-  useMemo(() => {
-    const mesh = meshRef.current;
-    // positions filled in useFrame first tick via layout below
-  }, []);
-
-  React.useEffect(() => {
+  useEffect(() => {
     const mesh = meshRef.current;
     if (!mesh) return;
     let i = 0;
     const rows = 8;
-    const perRow = Math.floor(count / (rows * 2));
-    for (const side of [-1, 1]) {
+    const banks = 4;
+    const perBank = Math.floor(count / banks);
+    const perRow = Math.floor(perBank / rows);
+
+    const placeBank = (
+      axis: "z" | "x",
+      sign: 1 | -1,
+      palette: [number, number, number]
+    ) => {
+      const span = axis === "z" ? PITCH.length - 4 : PITCH.width - 4;
+      const base = axis === "z" ? PITCH.halfZ + 2.2 : PITCH.halfX + 2.2;
       for (let row = 0; row < rows; row++) {
         for (let seat = 0; seat < perRow && i < count; seat++, i++) {
-          const x = (seat / perRow - 0.5) * 38;
-          const y = 1.2 + row * 0.55;
-          const z = side * (14.5 + row * 0.55);
-          dummy.position.set(x, y, z);
-          dummy.scale.set(0.28, 0.55 + Math.random() * 0.25, 0.28);
+          const along = (seat / Math.max(1, perRow - 1) - 0.5) * span;
+          const y = 1.5 + row * 0.58;
+          const out = base + row * 0.72;
+          if (axis === "z") {
+            dummy.position.set(along, y, sign * out);
+          } else {
+            dummy.position.set(sign * out, y, along);
+          }
+          dummy.scale.set(1, 1, 1);
+          dummy.lookAt(0, y, 0);
           dummy.updateMatrix();
           mesh.setMatrixAt(i, dummy.matrix);
-          const palette = side < 0 ? [0.83, 0.69, 0.42] : [0.75, 0.85, 0.95];
           color.setRGB(
-            palette[0] * (0.7 + Math.random() * 0.3),
-            palette[1] * (0.7 + Math.random() * 0.3),
-            palette[2] * (0.7 + Math.random() * 0.3)
+            palette[0] * (0.65 + Math.random() * 0.35),
+            palette[1] * (0.65 + Math.random() * 0.35),
+            palette[2] * (0.65 + Math.random() * 0.35)
           );
           mesh.setColorAt(i, color);
         }
       }
+    };
+
+    placeBank("z", -1, [0.83, 0.69, 0.42]);
+    placeBank("z", 1, [0.7, 0.82, 0.95]);
+    placeBank("x", -1, [0.75, 0.72, 0.55]);
+    placeBank("x", 1, [0.65, 0.75, 0.9]);
+
+    while (i < count) {
+      dummy.position.set(0, -10, 0);
+      dummy.scale.set(0, 0, 0);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      i++;
     }
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [count, color, dummy]);
+
+    const geom = mesh.geometry as THREE.BufferGeometry;
+    geom.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phases, 1));
+  }, [count, color, dummy, phases]);
+
+  const onBeforeCompile = (shader: THREE.WebGLProgramParametersWithUniforms) => {
+    shader.uniforms.uTime = { value: 0 };
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+         attribute float aPhase;
+         uniform float uTime;`
+      )
+      .replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+         transformed.y += sin(uTime * 2.2 + aPhase) * 0.08;`
+      );
+    (meshRef.current as any).__crowdShader = shader;
+  };
 
   useFrame((state) => {
-    const mesh = meshRef.current;
-    if (!mesh) return;
-    const t = state.clock.elapsedTime;
-    for (let i = 0; i < count; i++) {
-      mesh.getMatrixAt(i, dummy.matrix);
-      dummy.position.setFromMatrixPosition(dummy.matrix);
-      const baseY = dummy.position.y;
-      // Extract scale from matrix roughly — wave on Y only
-      dummy.position.y = baseY + Math.sin(t * 2.2 + phases[i]) * 0.08;
-      dummy.updateMatrix();
-      // Preserve scale: re-read is lossy; simpler bounce via matrix translation hack
+    const shader = (meshRef.current as any)?.__crowdShader;
+    if (shader?.uniforms?.uTime) {
+      shader.uniforms.uTime.value = state.clock.elapsedTime;
     }
-    // Cheaper: rotate whole crowd group slightly instead of per-instance rewrite every frame.
   });
 
   return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, count]} castShadow>
-      <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial toneMapped={false} />
+    <instancedMesh ref={meshRef} args={[undefined, undefined, count]} castShadow frustumCulled={false}>
+      <planeGeometry args={[0.45, 0.75]} />
+      <meshStandardMaterial
+        map={spectatorTex}
+        transparent
+        alphaTest={0.2}
+        roughness={0.85}
+        onBeforeCompile={onBeforeCompile}
+      />
     </instancedMesh>
   );
 }
@@ -199,12 +325,12 @@ export function Crowd({ count = 3000 }: { count?: number }) {
 export function GroundAtmosphere() {
   return (
     <>
-      <SoftShadows size={18} samples={12} focus={0.7} />
-      <ContactShadows position={[0, 0.01, 0]} opacity={0.45} scale={50} blur={2.5} far={20} />
+      <ContactShadows position={[0, 0.01, 0]} opacity={0.45} scale={130} blur={3.2} far={40} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, 0]} receiveShadow>
-        <planeGeometry args={[90, 90]} />
-        <meshStandardMaterial color="#070b0a" />
+        <planeGeometry args={[220, 180]} />
+        <meshStandardMaterial color="#0a1014" roughness={1} />
       </mesh>
+      <GroundMist />
     </>
   );
 }
