@@ -47,23 +47,23 @@ export function MatchPost({
         <N8AO
           aoRadius={quality.aoRadius}
           aoSamples={quality.aoSamples}
-          intensity={1.05}
+          intensity={0.65}
           distanceFalloff={1.15}
         />
       ) : (
         <></>
       )}
-      {midOrHigh ? <Bloom intensity={0.32} luminanceThreshold={0.78} mipmapBlur /> : <></>}
+      {midOrHigh ? <Bloom intensity={0.28} luminanceThreshold={0.72} mipmapBlur /> : <></>}
       {high && children ? children : <></>}
       <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
-      {midOrHigh ? <HueSaturation saturation={0.04} hue={-0.015} /> : <></>}
-      {midOrHigh ? <BrightnessContrast brightness={-0.02} contrast={0.1} /> : <></>}
+      {midOrHigh ? <HueSaturation saturation={0.06} hue={-0.01} /> : <></>}
+      {midOrHigh ? <BrightnessContrast brightness={0.06} contrast={0.06} /> : <></>}
       <Vignette
-        offset={0.3}
-        darkness={Math.min(vignette, 0.55)}
+        offset={0.35}
+        darkness={Math.min(vignette, 0.35)}
         blendFunction={riggedPulse ? BlendFunction.COLOR_BURN : BlendFunction.NORMAL}
       />
-      {high ? <Noise opacity={0.035} blendFunction={BlendFunction.OVERLAY} /> : <></>}
+      {high ? <Noise opacity={0.022} blendFunction={BlendFunction.OVERLAY} /> : <></>}
       {high ? (
         <ChromaticAberration
           // eslint-disable-next-line @typescript-eslint/no-explicit-any

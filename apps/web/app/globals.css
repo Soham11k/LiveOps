@@ -253,7 +253,7 @@ h2 { font-size: 16px; margin: 0 0 10px; letter-spacing: 0.06em; }
 canvas.pitch,
 .match-canvas {
   width: 100%;
-  height: min(70vh, 720px);
+  height: min(88vh, 900px);
   display: block;
 }
 

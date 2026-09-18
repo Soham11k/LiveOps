@@ -161,6 +161,34 @@ export function JointedPlayer({
   );
 }
 
+function measurePlayerHeight(root: THREE.Object3D): { height: number; method: string } {
+  root.updateMatrixWorld(true);
+  const min = new THREE.Vector3(1e9, 1e9, 1e9);
+  const max = new THREE.Vector3(-1e9, -1e9, -1e9);
+  const v = new THREE.Vector3();
+  let bones = 0;
+  root.traverse((obj) => {
+    const b = obj as THREE.Bone;
+    if (!b.isBone) return;
+    bones += 1;
+    b.getWorldPosition(v);
+    min.min(v);
+    max.max(v);
+  });
+  if (bones > 2) {
+    // Mixamo/Blender often ships cm-scale armatures; use longest axis (Y or Z-up)
+    const h = Math.max(max.x - min.x, max.y - min.y, max.z - min.z);
+    return { height: h, method: `bones:${bones}` };
+  }
+  const box = new THREE.Box3().setFromObject(root);
+  const h = Math.max(
+    box.max.x - box.min.x,
+    box.max.y - box.min.y,
+    box.max.z - box.min.z
+  );
+  return { height: h, method: "box3" };
+}
+
 function applyKit(
   root: THREE.Object3D,
   color: string,
@@ -183,41 +211,34 @@ function applyKit(
     }
     mesh.visible = true;
     mesh.frustumCulled = false;
-    const isSkin =
+    // Beta_Surface is one mesh — flat team color (head included) reads at distance
+    const mat = new THREE.MeshStandardMaterial({
+      color: team,
+      emissive: team.clone().multiplyScalar(0.15),
+      emissiveIntensity: 0.4,
+      roughness: 0.48,
+      metalness: 0.04,
+      side: THREE.DoubleSide,
+      transparent: false,
+      opacity: 1,
+      depthWrite: true,
+    });
+    // Keep a slightly warmer skin tint on named head-only meshes if present
+    if (
       n.includes("head") ||
       n.includes("face") ||
       n.includes("skin") ||
       n.includes("neck") ||
       n.includes("hand") ||
       n.includes("eyel") ||
-      n.includes("mouth");
-    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    mesh.material = mats.map((m) => {
-      const src = m as THREE.MeshStandardMaterial;
-      const cloned =
-        src && "color" in src
-          ? src.clone()
-          : new THREE.MeshStandardMaterial({ color: team });
-      if (isSkin) {
-        if (cloned.color) cloned.color.copy(skin);
-        cloned.map = null;
-        cloned.roughness = 0.72;
-        cloned.metalness = 0.02;
-        if (cloned.emissive) cloned.emissive.set("#000000");
-      } else {
-        // Mixamo UVs ≠ flat kit canvas — tint original albedo instead of replacing map
-        if (cloned.color) cloned.color.copy(team).multiplyScalar(1.25);
-        if (cloned.emissive) cloned.emissive.copy(team).multiplyScalar(0.22);
-        cloned.roughness = 0.45;
-        cloned.metalness = 0.04;
-      }
-      cloned.side = THREE.DoubleSide;
-      cloned.transparent = false;
-      cloned.opacity = 1;
-      cloned.depthWrite = true;
-      cloned.needsUpdate = true;
-      return cloned;
-    });
+      n.includes("mouth")
+    ) {
+      mat.color.copy(skin);
+      mat.emissive.set("#000000");
+      mat.emissiveIntensity = 0;
+      mat.roughness = 0.72;
+    }
+    mesh.material = mat;
   });
 }
 
@@ -261,38 +282,30 @@ function GlbPlayer({
     const c = skeletonClone(gltf.scene);
     applyKit(c, color, kitRole, number);
     c.updateMatrixWorld(true);
-    // SkinnedMesh AABB is unreliable before first skeleton update — prefer geometry bounds
-    let height = 0;
-    c.traverse((obj) => {
-      const mesh = obj as THREE.SkinnedMesh;
-      if (!(mesh as THREE.Mesh).isMesh) return;
-      const geom = mesh.geometry as THREE.BufferGeometry;
-      if (!geom) return;
-      geom.computeBoundingBox();
-      const gbox = geom.boundingBox;
-      if (!gbox) return;
-      const h = gbox.max.y - gbox.min.y;
-      if (h > height) height = h;
-    });
-    if (height < 0.3) {
-      const box = new THREE.Box3().setFromObject(c);
-      height = Math.max(0.3, box.max.y - box.min.y);
-    }
-    // Mixamo packs sometimes ship in centimetres (~170–180)
-    if (height > 50) height *= 0.01;
+    // Geometry-local AABB lies (~1.8) while Blender armature is ~0.018m — use bones
+    const { height: measuredH } = measurePlayerHeight(c);
+    const height = Math.max(measuredH, 0.001);
     const s = PITCH.playerHeight / height;
     c.scale.setScalar(s);
+    c.updateMatrixWorld(true);
     const boxAfter = new THREE.Box3().setFromObject(c);
     c.position.set(0, -boxAfter.min.y, 0);
     c.rotation.y = Math.PI;
     c.traverse((obj) => {
       const mesh = obj as THREE.SkinnedMesh;
-      if ((mesh as THREE.Mesh).isMesh) {
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        mesh.frustumCulled = false;
-        mesh.visible = true;
+      if (!(mesh as THREE.Mesh).isMesh) return;
+      const n = (mesh.name || "").toLowerCase();
+      if (
+        n.includes("joints") ||
+        n.includes("ico") ||
+        (n.includes("ball") && !n.includes("beta"))
+      ) {
+        mesh.visible = false;
+        return;
       }
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
       if (mesh.isSkinnedMesh && mesh.skeleton) {
         mesh.skeleton.update();
       }
@@ -411,6 +424,11 @@ export function AnimatedPlayer({
   const lodState = useRef(true);
 
   useFrame(() => {
+    const g = groupRef.current;
+    const dist = g
+      ? camera.position.distanceTo(g.getWorldPosition(new THREE.Vector3()))
+      : -1;
+
     // Controlled player always keeps Mixamo GLB under broadcast framing
     if (controlled) {
       if (!lodState.current) {
@@ -419,9 +437,7 @@ export function AnimatedPlayer({
       }
       return;
     }
-    const g = groupRef.current;
     if (!g) return;
-    const dist = camera.position.distanceTo(g.getWorldPosition(new THREE.Vector3()));
     let next = lodState.current;
     if (dist < lodNear) next = true;
     else if (dist > lodFar) next = false;

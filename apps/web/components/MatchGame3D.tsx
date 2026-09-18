@@ -137,12 +137,12 @@ function BroadcastCamera({
   stateRef: React.MutableRefObject<SceneState>;
 }) {
   const { camera } = useThree();
-  const desired = useRef(new THREE.Vector3(0, 20, 56));
+  const desired = useRef(new THREE.Vector3(0, 10, 24));
   const look = useRef(new THREE.Vector3(0, 1, 0));
   const camX = useRef(0);
-  const camY = useRef(20);
-  const camZ = useRef(56);
-  const baseFov = useRef(40);
+  const camY = useRef(10);
+  const camZ = useRef(24);
+  const baseFov = useRef(34);
 
   useFrame((state, delta) => {
     const s = stateRef.current;
@@ -163,26 +163,43 @@ function BroadcastCamera({
       look.current.copy(s.ball);
       baseFov.current = 38;
     } else {
-      // Outside the bowl (stands ~z±42); clear the near tier onto the pitch
+      // Crane over the pitch — NEVER behind near stand (halfZ+1.8≈36) or stand mesh blacks out play
       const speed = s.ballVel.length();
-      const lead = THREE.MathUtils.clamp(s.ballVel.x * 0.4, -10, 10);
-      const targetX = THREE.MathUtils.clamp(s.ball.x + lead, -28, 28);
-      camX.current = THREE.MathUtils.damp(camX.current, targetX, 2.4, delta);
+      const lead = THREE.MathUtils.clamp(s.ballVel.x * 0.35, -8, 8);
+      const targetX = THREE.MathUtils.clamp(s.ball.x + lead, -40, 40);
+      camX.current = THREE.MathUtils.damp(camX.current, targetX, 2.8, delta);
       const attack = THREE.MathUtils.clamp(s.ball.x / PITCH.halfX, -1, 1);
-      const wantY = 18 + Math.min(4, speed * 0.12) + Math.abs(attack) * 2.5;
-      const wantZ = 54 + Math.min(8, speed * 0.25) - Math.abs(attack) * 2;
-      camY.current = THREE.MathUtils.damp(camY.current, wantY, 1.6, delta);
-      camZ.current = THREE.MathUtils.damp(camZ.current, wantZ, 1.6, delta);
+      const depthAway = THREE.MathUtils.clamp(-s.ball.z, 0, PITCH.halfZ);
+      const followDist = THREE.MathUtils.clamp(26 - depthAway * 0.12, 22, 28);
+      const zMax = PITCH.halfZ - 6; // ~28 — stay well clear of near stand
+      const wantZ = THREE.MathUtils.clamp(s.ball.z + followDist, 14, zMax);
+      const groundDist = Math.abs(wantZ - s.ball.z);
+      const wantY =
+        8 +
+        Math.min(5, groundDist * 0.14) +
+        Math.abs(attack) * 1.0 +
+        Math.min(2, speed * 0.05);
+      camY.current = THREE.MathUtils.damp(camY.current, wantY, 2.0, delta);
+      camZ.current = THREE.MathUtils.damp(camZ.current, wantZ, 2.6, delta);
       desired.current.set(camX.current, camY.current, camZ.current);
-      look.current.set(
-        camX.current * 0.2 + s.ball.x * 0.8,
-        1.0 + Math.abs(s.ball.y) * 0.15,
-        s.ball.z * 0.55
+      const lookX = THREE.MathUtils.clamp(
+        camX.current * 0.3 + s.ball.x * 0.7,
+        -PITCH.halfX + 4,
+        PITCH.halfX - 4
       );
-      baseFov.current = THREE.MathUtils.clamp(40 + speed * 0.12, 40, 44);
+      look.current.set(
+        lookX,
+        1.0 + Math.abs(s.ball.y) * 0.12,
+        s.ball.z * 0.45
+      );
+      baseFov.current = THREE.MathUtils.clamp(
+        32 + depthAway * 0.06 + speed * 0.04,
+        32,
+        38
+      );
     }
 
-    camera.position.lerp(desired.current, 1 - Math.exp(-3.0 * delta));
+    camera.position.lerp(desired.current, 1 - Math.exp(-3.2 * delta));
     camera.lookAt(look.current);
 
     if (s.fovPunch && s.fovPunch > 0) {
@@ -317,7 +334,7 @@ function MatchScene({
     const trailing = s.home < s.away;
     const lateAssist = momentum && trailing && s.minute >= 70;
     s.riggedPulse = lateAssist && (s.phase === "run" || s.phase === "replay");
-    setVignette(s.riggedPulse ? 0.32 + Math.sin(t * 4) * 0.1 : 0.18);
+    setVignette(s.riggedPulse ? 0.22 + Math.sin(t * 4) * 0.08 : 0.1);
 
     s.homePositions = homePos.current;
     s.awayPositions = awayPos.current;
@@ -762,17 +779,18 @@ function MatchScene({
       ) : (
         <Environment preset="night" background={false} />
       )}
-      <ambientLight intensity={0.32} />
-      <hemisphereLight args={["#a8c0d8", "#1a2430", 0.45]} />
+      <ambientLight intensity={quality.tier === "high" ? 0.48 : 0.52} />
+      <hemisphereLight args={["#b8d0e8", "#1a2430", quality.tier === "high" ? 0.62 : 0.68]} />
       <directionalLight
         ref={dirLight}
         castShadow
         position={[22, 42, 18]}
-        intensity={1.55}
-        color="#c8d8e8"
+        intensity={quality.tier === "high" ? 1.9 : 2.05}
+        color="#d0e0f0"
       />
       {/* Soft fill so players/pitch read when flood pools miss a patch */}
-      <directionalLight position={[-12, 28, -20]} intensity={0.35} color="#8aa4bc" />
+      <directionalLight position={[-12, 28, -20]} intensity={0.65} color="#9ab4cc" />
+      <directionalLight position={[0, 25, 40]} intensity={0.4} color="#e8f0f8" />
       <Floodlights withShafts={quality.tier !== "low"} shadowMapSize={quality.shadowMapSize} />
       {showSnow && (
         <SnowStorm
@@ -882,6 +900,7 @@ export function MatchGame({ profile }: { profile: Profile }) {
   const gaslightUntil = useRef(0);
   const [qualityTier, setQualityTier] = useState<QualityTier>("high");
   const quality = useMemo(() => getQuality(qualityTier), [qualityTier]);
+  const qualityDeclineRef = useRef(0);
   const chancesRef = useRef<ChanceLog[]>([]);
   const submitted = useRef(false);
   const homeRef = useRef(0);
@@ -1236,7 +1255,7 @@ export function MatchGame({ profile }: { profile: Profile }) {
   });
 
   const camera = useMemo(
-    () => ({ position: [0, 20, 56] as [number, number, number], fov: 40 }),
+    () => ({ position: [0, 10, 24] as [number, number, number], fov: 34 }),
     []
   );
 
@@ -1265,15 +1284,35 @@ export function MatchGame({ profile }: { profile: Profile }) {
               onCreated={({ gl, camera: cam }) => {
                 gl.toneMapping = THREE.NoToneMapping;
                 gl.toneMappingExposure = 1;
-                cam.position.set(0, 20, 56);
+                cam.position.set(0, 10, 24);
                 cam.lookAt(0, 1, 0);
               }}
               className="match-canvas"
-              style={{ width: "100%", height: "min(70vh, 720px)" }}
+              style={{ width: "100%", height: "min(88vh, 900px)" }}
             >
               <PerformanceMonitor
-                onDecline={() => setQualityTier((t) => stepDown(t))}
-                onIncline={() => setQualityTier((t) => stepUp(t))}
+                onDecline={() =>
+                  setQualityTier((t) => {
+                    // Require sustained decline before stepping down (avoids first-frame medium)
+                    qualityDeclineRef.current += 1;
+                    if (qualityDeclineRef.current < 2) {
+                      return t;
+                    }
+                    // Floor at medium — low kills flood shafts / player read
+                    if (t === "medium" || t === "low") {
+                      return "medium";
+                    }
+                    const next = stepDown(t);
+                    return next;
+                  })
+                }
+                onIncline={() =>
+                  setQualityTier((t) => {
+                    qualityDeclineRef.current = 0;
+                    const next = stepUp(t);
+                    return next;
+                  })
+                }
               />
               <AdaptiveDpr pixelated />
               <MatchScene

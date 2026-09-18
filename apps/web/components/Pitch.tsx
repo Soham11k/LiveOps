@@ -184,31 +184,31 @@ export function Pitch({ snowAmount = 0 }: { snowAmount?: number }) {
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.002, 0]}>
         <planeGeometry args={[PITCH.length + 2, PITCH.width + 2]} />
         <MeshReflectorMaterial
-          blur={[280, 80]}
-          resolution={512}
-          mixBlur={0.85}
-          mixStrength={0.45}
-          roughness={0.55}
-          depthScale={0.6}
+          blur={[200, 60]}
+          resolution={384}
+          mixBlur={0.9}
+          mixStrength={0.22}
+          roughness={0.7}
+          depthScale={0.4}
           minDepthThreshold={0.85}
           maxDepthThreshold={1.2}
           color="#1a2a28"
-          metalness={0.35}
-          mirror={0.15}
+          metalness={0.2}
+          mirror={0.08}
         />
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]} receiveShadow>
         <planeGeometry args={[PITCH.length, PITCH.width]} />
         <meshStandardMaterial
-          color={colorMap ? "#6a9a72" : "#3a7a4a"}
+          color={colorMap ? "#7eb884" : "#4a8a5a"}
           map={colorMap || undefined}
           normalMap={normalMap || undefined}
           roughnessMap={roughMap || undefined}
-          roughness={0.72}
-          metalness={0.04}
-          envMapIntensity={0.45}
-          transparent
-          opacity={0.94}
+          roughness={0.68}
+          metalness={0.03}
+          envMapIntensity={0.7}
+          transparent={false}
+          opacity={1}
           onBeforeCompile={onBeforeCompile}
         />
       </mesh>

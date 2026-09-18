@@ -17,11 +17,11 @@ const KIT_COLORS: Record<
     skin: "#c4a882",
   },
   away: {
-    body: "#d8e8f4",
-    sleeve: "#b8d0e4",
+    body: "#5a9fd4",
+    sleeve: "#3a7fb4",
     shorts: "#1a3048",
     socks: "#1a3048",
-    accent: "#3a6a9a",
+    accent: "#d8e8f4",
     skin: "#c4a882",
   },
   gk: {
